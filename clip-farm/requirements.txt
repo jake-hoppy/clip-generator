@@ -1,0 +1,7 @@
+# clip-farm dependencies
+# Python 3.11+
+
+yt-dlp>=2024.1.0
+PyYAML>=6.0
+
+# FFmpeg must be installed separately (brew install ffmpeg / apt install ffmpeg)

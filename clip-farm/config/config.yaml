@@ -1,0 +1,38 @@
+# clip-farm pipeline configuration (MVP v0/v1)
+
+# Search queries (yt-dlp will search YouTube for each)
+queries:
+  - "friends funniest moments"
+  - "the office best moments"
+
+# Optional: direct YouTube URLs to include in the pool
+urls: []
+
+# How many search results to take per query (before applying max_videos_total)
+results_per_query: 10
+
+# Cap total number of source videos across all queries + urls
+max_videos_total: 25
+
+# Download format (prefer mp4 for compatibility)
+download_format: "mp4"
+
+# Clip generation
+clip_length_seconds: 18
+clip_step_seconds: 12   # step < length creates overlap; step == length = no overlap
+# If true, include a final chunk even if shorter than clip_length_seconds
+allow_final_short_chunk: false
+
+# Filter source videos by duration (seconds)
+min_video_duration_seconds: 60
+max_video_duration_seconds: 1800
+
+# Optional: audio-based scoring to rank candidate clips
+enable_audio_scoring: false
+# If scoring enabled: keep top K clips per source video in ranked manifest
+top_k_per_video: 5
+# When true, only keep top_k clips on disk (aggressive); when false, keep all, just rank in manifest
+prune_below_top_k: false
+
+# Deterministic ordering (optional)
+seed: 42
