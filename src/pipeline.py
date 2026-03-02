@@ -3,6 +3,7 @@ Orchestrates pipeline steps: download -> chunk -> (optional) audio score.
 Loads config from YAML; supports dry-run and limit overrides.
 """
 import logging
+import shutil
 from pathlib import Path
 from typing import Any
 
@@ -99,6 +100,54 @@ def run_full(
     clips = run_chunk(config, dry_run=dry_run)
     ranked = run_audio_score(config, dry_run=dry_run)
     return videos, clips, ranked
+
+
+def run_refresh(dry_run: bool = False) -> tuple[int, int]:
+    """
+    Delete all candidate clips and their manifests (candidates + candidates_ranked).
+    Source videos in data/videos/ and data/manifests/videos/ are left intact.
+    Returns (clips_dirs_removed, manifest_files_removed).
+    """
+    ensure_data_dirs()
+    clips_removed = 0
+    manifests_removed = 0
+
+    # Remove each video's clip directory under data/candidates/
+    cand_dir = candidates_dir()
+    if cand_dir.exists():
+        for sub in cand_dir.iterdir():
+            if sub.is_dir():
+                if dry_run:
+                    logger.info("Would remove %s", sub)
+                else:
+                    shutil.rmtree(sub, ignore_errors=True)
+                clips_removed += 1
+
+    # Remove candidate manifests (data/manifests/candidates/*.json)
+    mc_dir = manifests_candidates_dir()
+    if mc_dir.exists():
+        for f in mc_dir.glob("*.json"):
+            if dry_run:
+                manifests_removed += 1
+                logger.info("Would remove %s", f)
+            else:
+                f.unlink(missing_ok=True)
+                manifests_removed += 1
+
+    # Remove ranked manifests (data/manifests/candidates_ranked/*.json)
+    rank_dir = manifests_candidates_ranked_dir()
+    if rank_dir.exists():
+        for f in rank_dir.glob("*.json"):
+            if dry_run:
+                manifests_removed += 1
+                logger.info("Would remove %s", f)
+            else:
+                f.unlink(missing_ok=True)
+                manifests_removed += 1
+
+    if not dry_run:
+        logger.info("Refresh: removed %d clip dirs, %d manifest files", clips_removed, manifests_removed)
+    return clips_removed, manifests_removed
 
 
 def print_summary(

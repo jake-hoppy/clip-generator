@@ -52,6 +52,9 @@ python -m src.main chunk
 
 # Full pipeline: download + chunk + optional audio scoring
 python -m src.main run
+
+# Refresh: delete all candidate clips and their manifests (keeps source videos in data/videos/)
+python -m src.main refresh
 ```
 
 ### Optional flags
@@ -68,6 +71,7 @@ Examples:
 python -m src.main run --config config/config.yaml --dry-run
 python -m src.main download --limit-videos 5 --limit-queries 1
 python -m src.main run --verbose
+python -m src.main refresh --dry-run   # show what would be deleted without deleting
 ```
 
 ## Output layout

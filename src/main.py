@@ -8,7 +8,7 @@ from pathlib import Path
 
 from src.utils.paths import project_root
 from src.utils.logging_setup import setup_logging
-from src.pipeline import load_config, run_download, run_chunk, run_audio_score, run_full, print_summary
+from src.pipeline import load_config, run_download, run_chunk, run_audio_score, run_full, run_refresh, print_summary
 from src.media.ffmpeg import require_ffmpeg
 
 
@@ -44,6 +44,20 @@ def cmd_run(args: argparse.Namespace, config: dict) -> None:
     print_summary(videos, clips, ranked, args.dry_run)
 
 
+def cmd_refresh(args: argparse.Namespace, config: dict) -> None:
+    clips_dirs, manifest_files = run_refresh(dry_run=args.dry_run)
+    print("\n" + "=" * 60)
+    print("REFRESH (clips cleared)")
+    print("=" * 60)
+    if args.dry_run:
+        print("  (dry run — nothing deleted)")
+    print(f"  Clip dirs removed:     {clips_dirs}")
+    print(f"  Manifest files removed: {manifest_files}")
+    print("  Source videos in data/videos/ were kept.")
+    print("  Run 'chunk' or 'run' to regenerate clips.")
+    print("=" * 60)
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(
         prog="clip-farm",
@@ -77,6 +91,14 @@ def main() -> int:
     p_run.add_argument("--limit-queries", type=int, default=None, help="Limit number of queries to run")
     p_run.add_argument("--dry-run", action="store_true", help="Do not write files")
     p_run.set_defaults(func=cmd_run)
+
+    # refresh
+    p_refresh = subparsers.add_parser(
+        "refresh",
+        help="Delete all candidate clips and their manifests; keep source videos. Run chunk/run to regenerate.",
+    )
+    p_refresh.add_argument("--dry-run", action="store_true", help="Only log what would be deleted")
+    p_refresh.set_defaults(func=cmd_refresh)
 
     args = parser.parse_args()
     setup_logging(verbose=args.verbose)
