@@ -53,6 +53,9 @@ python -m src.main chunk
 # Full pipeline: download + chunk + optional audio scoring
 python -m src.main run
 
+# Score: rank existing candidate clips by audio energy (no download/chunk)
+python -m src.main score
+
 # Refresh: delete all candidate clips and their manifests (keeps source videos in data/videos/)
 python -m src.main refresh
 ```
@@ -72,6 +75,7 @@ python -m src.main run --config config/config.yaml --dry-run
 python -m src.main download --limit-videos 5 --limit-queries 1
 python -m src.main run --verbose
 python -m src.main refresh --dry-run   # show what would be deleted without deleting
+python -m src.main score               # rank existing candidates (uses top_k_per_video from config)
 ```
 
 ## Output layout
