@@ -36,3 +36,8 @@ prune_below_top_k: false
 
 # Deterministic ordering (optional)
 seed: 42
+
+# Loud-moments mode (command: loud): find peaks per video, take top N globally
+top_n_loud_global: 20
+loud_peaks_per_video: 50
+loud_min_peak_distance_seconds: 20

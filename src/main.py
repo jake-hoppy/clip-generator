@@ -14,6 +14,7 @@ from src.pipeline import (
     run_chunk,
     run_audio_score,
     run_full,
+    run_loud,
     run_refresh,
     copy_ranked_clips_to_output,
     print_summary,
@@ -78,6 +79,19 @@ def cmd_score(args: argparse.Namespace, config: dict) -> None:
     print("=" * 60)
 
 
+def cmd_loud(args: argparse.Namespace, config: dict) -> None:
+    """Detect loud moments per video, take top N globally, extract to data/outputs/ranked/."""
+    clips = run_loud(config, dry_run=args.dry_run)
+    print("\n" + "=" * 60)
+    print("LOUD (top loud moments across all videos)")
+    print("=" * 60)
+    if args.dry_run:
+        print("  (dry run — no files written)")
+    print(f"  Clips extracted:  {len(clips)}")
+    print(f"  Output:           {outputs_ranked_dir()}")
+    print("=" * 60)
+
+
 def cmd_refresh(args: argparse.Namespace, config: dict) -> None:
     clips_dirs, manifest_files = run_refresh(dry_run=args.dry_run)
     print("\n" + "=" * 60)
@@ -134,6 +148,14 @@ def main() -> int:
     p_score.add_argument("--dry-run", action="store_true", help="Do not write ranked manifests")
     p_score.set_defaults(func=cmd_score)
 
+    # loud (peak detection on full videos -> top N loud clips globally -> outputs/ranked/)
+    p_loud = subparsers.add_parser(
+        "loud",
+        help="Find loudest moments per video, take top N globally (config: top_n_loud_global), extract to data/outputs/ranked/.",
+    )
+    p_loud.add_argument("--dry-run", action="store_true", help="Do not extract clips")
+    p_loud.set_defaults(func=cmd_loud)
+
     # refresh
     p_refresh = subparsers.add_parser(
         "refresh",
@@ -151,7 +173,7 @@ def main() -> int:
         print(f"Error: {e}", file=sys.stderr)
         return 1
 
-    if args.command in ("chunk", "run", "score"):
+    if args.command in ("chunk", "run", "score", "loud"):
         try:
             require_ffmpeg()
         except RuntimeError as e:

@@ -38,6 +38,9 @@ Edit `config/config.yaml` to set:
 - **min_video_duration_seconds** / **max_video_duration_seconds** – filter source videos by duration
 - **enable_audio_scoring** – if true, score clips by audio energy and write ranked manifests
 - **top_k_per_video** – when scoring, how many top clips per video to list in ranked manifest
+- **top_n_loud_global** – (command `loud`) number of loudest clips to keep globally across all videos (e.g. 20)
+- **loud_peaks_per_video** – max loud-moment peaks to consider per video before ranking (e.g. 50)
+- **loud_min_peak_distance_seconds** – minimum seconds between peak centers (e.g. 20)
 
 ## How to run
 
@@ -55,6 +58,9 @@ python -m src.main run
 
 # Score: rank existing candidates by audio, then copy top-K MP4s to data/outputs/ranked/
 python -m src.main score
+
+# Loud: find loudest moments per video (peak detection), take top 20 globally, extract to data/outputs/ranked/
+python -m src.main loud
 
 # Refresh: delete all candidate clips and their manifests (keeps source videos in data/videos/)
 python -m src.main refresh
@@ -76,6 +82,7 @@ python -m src.main download --limit-videos 5 --limit-queries 1
 python -m src.main run --verbose
 python -m src.main refresh --dry-run   # show what would be deleted without deleting
 python -m src.main score               # rank existing candidates (uses top_k_per_video from config)
+python -m src.main loud                # top 20 loud moments across all downloaded videos (uses top_n_loud_global)
 ```
 
 ## Output layout
@@ -87,7 +94,7 @@ data/
   videos/              # Downloaded source videos (<video_id>.mp4)
   candidates/          # Candidate clips per video (<video_id>/<video_id>_t{start_ms}_{end_ms}.mp4)
   outputs/
-    ranked/            # Top-K ranked clip MP4s (copied when you run score)
+    ranked/            # Top ranked clips: from score (top-K per video) or loud (top 20 loud globally)
   logs/                # run.log
   manifests/
     videos/            # JSON metadata per downloaded video

@@ -22,10 +22,12 @@ from src.utils.paths import (
     outputs_ranked_dir,
 )
 from src.utils.logging_setup import setup_logging
-from src.media.ffmpeg import require_ffmpeg
+from src.media.ffmpeg import require_ffmpeg, extract_clip
 from src.youtube.search_download import build_video_pool, VideoMeta
 from src.media.chunk import chunk_all_downloaded, ClipMeta
 from src.media.audio_score import score_all_candidates
+from src.media.audio_peaks import get_loud_segments_for_video
+from src.utils.paths import video_file_path
 
 logger = logging.getLogger(__name__)
 
@@ -102,6 +104,93 @@ def run_full(
     clips = run_chunk(config, dry_run=dry_run)
     ranked = run_audio_score(config, dry_run=dry_run)
     return videos, clips, ranked
+
+
+def _resolve_video_path(video_id: str) -> Path | None:
+    """Return path to downloaded video file (any extension)."""
+    p = video_file_path(video_id)
+    if p.exists():
+        return p
+    for f in videos_dir().glob(f"{video_id}.*"):
+        return f
+    return None
+
+
+def run_loud(
+    config: dict[str, Any],
+    dry_run: bool = False,
+) -> list[dict]:
+    """
+    Detect loud moments per video (audio peak detection), rank all segments globally by loudness,
+    take top N (config: top_n_loud_global), extract those clips to data/outputs/ranked/.
+    Does not use fixed-window chunking or data/candidates/.
+    """
+    require_ffmpeg()
+    ensure_data_dirs()
+    clip_length = float(config.get("clip_length_seconds", 18))
+    top_n = int(config.get("top_n_loud_global", 20))
+    peaks_per_video = int(config.get("loud_peaks_per_video", 50))
+    min_peak_distance = float(config.get("loud_min_peak_distance_seconds", 20))
+
+    manifests_videos_dir().mkdir(parents=True, exist_ok=True)
+    all_segments: list[dict] = []
+    for mpath in manifests_videos_dir().glob("*.json"):
+        video_id = mpath.stem
+        video_path = _resolve_video_path(video_id)
+        if not video_path:
+            logger.warning("No video file for %s, skipping", video_id)
+            continue
+        try:
+            segments = get_loud_segments_for_video(
+                video_path,
+                video_id,
+                clip_length_sec=clip_length,
+                peaks_per_video=peaks_per_video,
+                min_peak_distance_sec=min_peak_distance,
+            )
+            for seg in segments:
+                seg["_video_path"] = video_path
+            all_segments.extend(segments)
+        except Exception as e:
+            logger.warning("Loud segments failed for %s: %s", video_id, e)
+            continue
+
+    all_segments.sort(key=lambda s: s["score"], reverse=True)
+    top = all_segments[:top_n]
+    if not top:
+        logger.info("No loud segments found")
+        return []
+
+    if dry_run:
+        logger.info("Would extract top %d loud clips to %s", len(top), outputs_ranked_dir())
+        return top
+
+    out_dir = outputs_ranked_dir()
+    out_dir.mkdir(parents=True, exist_ok=True)
+    manifest_list = []
+    for i, seg in enumerate(top, start=1):
+        video_path = seg.get("_video_path")
+        if not video_path:
+            continue
+        start_sec = seg["start_sec"]
+        end_sec = seg["end_sec"]
+        duration_sec = end_sec - start_sec
+        out_name = f"rank_{i:03d}_{seg['clip_id']}.mp4"
+        out_path = out_dir / out_name
+        try:
+            extract_clip(video_path, out_path, start_sec, duration_sec, use_stream_copy=True)
+        except Exception as e:
+            logger.warning("Extract failed %s: %s", out_name, e)
+            continue
+        entry = {k: v for k, v in seg.items() if k != "_video_path"}
+        entry["filepath"] = str(out_path)
+        manifest_list.append(entry)
+
+    manifest_path = out_dir / "top_loud_manifest.json"
+    with open(manifest_path, "w", encoding="utf-8") as f:
+        json.dump({"top_n": top_n, "clips": manifest_list}, f, indent=2)
+    logger.info("Wrote %d loud clips to %s", len(manifest_list), out_dir)
+    return manifest_list
 
 
 def run_refresh(dry_run: bool = False) -> tuple[int, int]:
