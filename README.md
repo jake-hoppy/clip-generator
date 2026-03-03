@@ -1,6 +1,6 @@
 # clip-farm
 
-Build a pool of short vertical-ready candidate clips from multiple YouTube videos. MVP v0/v1: YouTube search + download + chunk into fixed-length clips + optional audio-based ranking.
+Build a pool of short vertical-ready clips from multiple YouTube videos: search + download, then extract the **top N loudest moments** across all videos (audio peak detection) into `data/outputs/ranked/`.
 
 ## Prerequisites
 
@@ -33,12 +33,9 @@ Edit `config/config.yaml` to set:
 - **urls** – optional list of direct YouTube URLs
 - **results_per_query** – how many search results per query (e.g. 10)
 - **max_videos_total** – cap on total source videos (e.g. 25)
-- **clip_length_seconds** – length of each candidate clip (e.g. 18)
-- **clip_step_seconds** – step between clip starts (e.g. 12; step < length = overlap)
 - **min_video_duration_seconds** / **max_video_duration_seconds** – filter source videos by duration
-- **enable_audio_scoring** – if true, score clips by audio energy and write ranked manifests
-- **top_k_per_video** – when scoring, how many top clips per video to list in ranked manifest
-- **top_n_loud_global** – (command `loud`) number of loudest clips to keep globally across all videos (e.g. 20)
+- **clip_length_seconds** – length of each extracted clip around a loud peak (e.g. 18)
+- **top_n_loud_global** – number of loudest clips to keep globally across all videos (e.g. 20)
 - **loud_peaks_per_video** – max loud-moment peaks to consider per video before ranking (e.g. 50)
 - **loud_min_peak_distance_seconds** – minimum seconds between peak centers (e.g. 20)
 
@@ -50,19 +47,13 @@ From the **project root** (`clip-farm/`):
 # Download only (build video pool from queries + URLs)
 python -m src.main download
 
-# Chunk only (segment all already-downloaded videos into clips)
-python -m src.main chunk
-
-# Full pipeline: download + chunk + optional audio scoring
+# Full pipeline: download + find top N loud moments across all videos → data/outputs/ranked/
 python -m src.main run
 
-# Score: rank existing candidates by audio, then copy top-K MP4s to data/outputs/ranked/
-python -m src.main score
-
-# Loud: find loudest moments per video (peak detection), take top 20 globally, extract to data/outputs/ranked/
+# Loud only: find top N loud moments from already-downloaded videos, extract to data/outputs/ranked/
 python -m src.main loud
 
-# Refresh: delete all candidate clips and their manifests (keeps source videos in data/videos/)
+# Refresh: delete old candidate data (keeps source videos); then run or loud to regenerate
 python -m src.main refresh
 ```
 
@@ -77,12 +68,11 @@ python -m src.main refresh
 Examples:
 
 ```bash
-python -m src.main run --config config/config.yaml --dry-run
+python -m src.main run --limit-videos 3 --limit-queries 1   # 3 videos, 1 query, then top 20 loud
 python -m src.main download --limit-videos 5 --limit-queries 1
 python -m src.main run --verbose
+python -m src.main loud                # top 20 loud moments from existing downloads (uses top_n_loud_global)
 python -m src.main refresh --dry-run   # show what would be deleted without deleting
-python -m src.main score               # rank existing candidates (uses top_k_per_video from config)
-python -m src.main loud                # top 20 loud moments across all downloaded videos (uses top_n_loud_global)
 ```
 
 ## Output layout
@@ -92,14 +82,11 @@ All output lives under `./data/` (gitignored):
 ```
 data/
   videos/              # Downloaded source videos (<video_id>.mp4)
-  candidates/          # Candidate clips per video (<video_id>/<video_id>_t{start_ms}_{end_ms}.mp4)
   outputs/
-    ranked/            # Top ranked clips: from score (top-K per video) or loud (top 20 loud globally)
+    ranked/            # Top N loudest clip MP4s (rank_001_..., rank_002_..., top_loud_manifest.json)
   logs/                # run.log
   manifests/
     videos/            # JSON metadata per downloaded video
-    candidates/        # JSON manifest of clips per video
-    candidates_ranked/ # Top-K per video (used by score; outputs/ranked gets the MP4s)
 ```
 
 After a run, the CLI prints a short summary: number of videos, number of clips, and paths.

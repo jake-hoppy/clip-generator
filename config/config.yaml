@@ -17,27 +17,17 @@ max_videos_total: 25
 # Download format (prefer mp4 for compatibility)
 download_format: "mp4"
 
-# Clip generation
+# Clip length for loud-moment segments (seconds)
 clip_length_seconds: 18
-clip_step_seconds: 12   # step < length creates overlap; step == length = no overlap
-# If true, include a final chunk even if shorter than clip_length_seconds
-allow_final_short_chunk: false
 
 # Filter source videos by duration (seconds)
 min_video_duration_seconds: 60
 max_video_duration_seconds: 1800
 
-# Optional: audio-based scoring to rank candidate clips
-enable_audio_scoring: false
-# If scoring enabled: keep top K clips per source video in ranked manifest
-top_k_per_video: 5
-# When true, only keep top_k clips on disk (aggressive); when false, keep all, just rank in manifest
-prune_below_top_k: false
-
-# Deterministic ordering (optional)
+# Deterministic ordering for download (optional)
 seed: 42
 
-# Loud-moments mode (command: loud): find peaks per video, take top N globally
+# Loud moments: find peaks per video, take top N globally
 top_n_loud_global: 20
 loud_peaks_per_video: 50
 loud_min_peak_distance_seconds: 20

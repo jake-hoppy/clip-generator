@@ -1,5 +1,5 @@
 """
-Orchestrates pipeline steps: download -> chunk -> (optional) audio score.
+Orchestrates pipeline steps: download -> loud (top N loud moments globally).
 Loads config from YAML; supports dry-run and limit overrides.
 """
 import json
@@ -21,11 +21,8 @@ from src.utils.paths import (
     manifests_candidates_ranked_dir,
     outputs_ranked_dir,
 )
-from src.utils.logging_setup import setup_logging
 from src.media.ffmpeg import require_ffmpeg, extract_clip
 from src.youtube.search_download import build_video_pool, VideoMeta
-from src.media.chunk import chunk_all_downloaded, ClipMeta
-from src.media.audio_score import score_all_candidates
 from src.media.audio_peaks import get_loud_segments_for_video
 from src.utils.paths import video_file_path
 
@@ -63,47 +60,16 @@ def run_download(
     )
 
 
-def run_chunk(
-    config: dict[str, Any],
-    dry_run: bool = False,
-) -> list[ClipMeta]:
-    """Chunk step only: segment all downloaded videos into candidate clips."""
-    require_ffmpeg()
-    ensure_data_dirs()
-    return chunk_all_downloaded(
-        clip_length_seconds=float(config.get("clip_length_seconds", 18)),
-        clip_step_seconds=float(config.get("clip_step_seconds", 12)),
-        allow_final_short_chunk=bool(config.get("allow_final_short_chunk", False)),
-        dry_run=dry_run,
-    )
-
-
-def run_audio_score(
-    config: dict[str, Any],
-    dry_run: bool = False,
-) -> dict[str, list[dict]]:
-    """Score and rank candidates (optional)."""
-    if not config.get("enable_audio_scoring", False):
-        return {}
-    require_ffmpeg()
-    ensure_data_dirs()
-    return score_all_candidates(
-        top_k_per_video=int(config.get("top_k_per_video", 5)),
-        dry_run=dry_run,
-    )
-
-
 def run_full(
     config: dict[str, Any],
     dry_run: bool = False,
     limit_videos: int | None = None,
     limit_queries: int | None = None,
-) -> tuple[list[VideoMeta], list[ClipMeta], dict[str, list[dict]]]:
-    """Run full pipeline: download -> chunk -> (optional) audio score."""
+) -> tuple[list[VideoMeta], list[dict]]:
+    """Run full pipeline: download -> loud (top N loud moments across all videos)."""
     videos = run_download(config, dry_run=dry_run, limit_videos=limit_videos, limit_queries=limit_queries)
-    clips = run_chunk(config, dry_run=dry_run)
-    ranked = run_audio_score(config, dry_run=dry_run)
-    return videos, clips, ranked
+    loud_clips = run_loud(config, dry_run=dry_run)
+    return videos, loud_clips
 
 
 def _resolve_video_path(video_id: str) -> Path | None:
@@ -241,64 +207,33 @@ def run_refresh(dry_run: bool = False) -> tuple[int, int]:
     return clips_removed, manifests_removed
 
 
-def copy_ranked_clips_to_output(dry_run: bool = False) -> int:
-    """
-    Copy top-K ranked clip MP4s from candidates into data/outputs/ranked/.
-    Reads each data/manifests/candidates_ranked/*.json and copies each clip's file.
-    Returns number of files copied. Fast (file copy only, no re-encode).
-    """
-    ensure_data_dirs()
-    rank_dir = manifests_candidates_ranked_dir()
-    out_dir = outputs_ranked_dir()
-    if not rank_dir.exists():
-        return 0
-    copied = 0
-    for mpath in rank_dir.glob("*.json"):
-        try:
-            with open(mpath, encoding="utf-8") as f:
-                data = json.load(f)
-        except (json.JSONDecodeError, OSError) as e:
-            logger.warning("Skip %s: %s", mpath, e)
-            continue
-        for clip in data.get("clips_ranked", []):
-            src = Path(clip.get("filepath", ""))
-            if not src or not src.exists():
-                continue
-            clip_id = clip.get("clip_id", src.stem)
-            dest = out_dir / f"{clip_id}.mp4"
-            if dry_run:
-                logger.info("Would copy %s -> %s", src.name, dest)
-                copied += 1
-                continue
-            out_dir.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(src, dest)
-            copied += 1
-    if not dry_run and copied:
-        logger.info("Copied %d ranked clip(s) to %s", copied, out_dir)
-    return copied
-
-
-def print_summary(
-    videos: list[VideoMeta],
-    clips: list[ClipMeta],
-    ranked: dict[str, list[dict]],
-    dry_run: bool,
-) -> None:
-    """Print final summary to console."""
+def print_summary(videos: list[VideoMeta], dry_run: bool) -> None:
+    """Print summary for download-only run."""
     print("\n" + "=" * 60)
     print("CLIP-FARM SUMMARY")
     print("=" * 60)
     if dry_run:
         print("(dry run — no files written)")
     print(f"  Videos in pool:     {len(videos)}")
-    print(f"  Candidate clips:    {len(clips)}")
-    if ranked:
-        total_ranked = sum(len(v) for v in ranked.values())
-        print(f"  Ranked (top-K):     {total_ranked} clips across {len(ranked)} videos")
     print(f"\n  Data root:          {data_root()}")
     print(f"  Videos:             {videos_dir()}")
-    print(f"  Candidates:         {candidates_dir()}")
-    print(f"  Manifests:          {manifests_dir()}")
-    if ranked:
-        print(f"  Ranked manifests:   {manifests_candidates_ranked_dir()}")
+    print("=" * 60)
+
+
+def print_run_summary(
+    videos: list[VideoMeta],
+    loud_clips: list[dict],
+    dry_run: bool,
+) -> None:
+    """Print summary for full run (download + loud)."""
+    print("\n" + "=" * 60)
+    print("CLIP-FARM SUMMARY (download + top loud moments)")
+    print("=" * 60)
+    if dry_run:
+        print("(dry run — no files written)")
+    print(f"  Videos in pool:     {len(videos)}")
+    print(f"  Loud clips:         {len(loud_clips)} (top globally)")
+    print(f"\n  Data root:          {data_root()}")
+    print(f"  Videos:             {videos_dir()}")
+    print(f"  Output (ranked):    {outputs_ranked_dir()}")
     print("=" * 60)
