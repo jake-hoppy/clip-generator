@@ -215,12 +215,16 @@ def build_video_pool(
     videos_dir().mkdir(parents=True, exist_ok=True)
     manifests_videos_dir().mkdir(parents=True, exist_ok=True)
 
+    max_total = limit_videos if limit_videos is not None else max_videos_total
+    # Fetch enough candidates so we can keep trying until we hit max_total (many may fail duration filter)
+    fetch_per_query = min(50, max(results_per_query, max_total * 15))
+
     all_urls: list[str] = []
     if limit_queries is not None:
         queries = queries[:limit_queries]
     for q in queries:
         try:
-            found = _search_youtube(q, results_per_query)
+            found = _search_youtube(q, fetch_per_query)
             all_urls.extend(found)
         except (YtDlpError, json.JSONDecodeError) as e:
             logger.warning("Search failed for query %r: %s", q, e)
@@ -239,15 +243,18 @@ def build_video_pool(
         rng = random.Random(seed)
         rng.shuffle(all_urls)
 
-    max_total = limit_videos if limit_videos is not None else max_videos_total
-    all_urls = all_urls[:max_total]
+    # Cap how many URLs we'll try (avoid unbounded loop); we need at least enough to try for max_total
+    max_candidates = max(len(all_urls), max_total * 20)
+    all_urls = all_urls[:max_candidates]
 
     if dry_run:
-        logger.info("Dry run: would process %d URLs", len(all_urls))
+        logger.info("Dry run: would process up to %d URLs until %d videos", len(all_urls), max_total)
         return []
 
     results: list[VideoMeta] = []
     for url in all_urls:
+        if len(results) >= max_total:
+            break
         try:
             info = _get_video_info(url)
             duration = float(info.get("duration") or 0)
@@ -260,8 +267,9 @@ def build_video_pool(
                 mpath = video_manifest_path(video_id)
                 with open(mpath, encoding="utf-8") as f:
                     results.append(VideoMeta.from_dict(json.load(f)))
+                if len(results) >= max_total:
+                    break
                 continue
-            out_path = video_file_path(video_id, download_format)
             meta = _download_one(
                 url,
                 download_format=download_format,
@@ -270,8 +278,17 @@ def build_video_pool(
             )
             if meta:
                 results.append(meta)
+                if len(results) >= max_total:
+                    break
         except (YtDlpError, json.JSONDecodeError, OSError) as e:
             logger.warning("Failed to process %s: %s", url, e)
             continue
+
+    if len(results) < max_total:
+        logger.warning(
+            "Only found %d video(s) within duration range (target was %d). Try relaxing min/max duration or more queries.",
+            len(results),
+            max_total,
+        )
 
     return results

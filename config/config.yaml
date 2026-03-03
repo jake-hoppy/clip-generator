@@ -24,8 +24,9 @@ clip_step_seconds: 12   # step < length creates overlap; step == length = no ove
 allow_final_short_chunk: false
 
 # Filter source videos by duration (seconds)
+# Increase max if search returns long compilations (e.g. "friends funniest moments" often 45–60 min)
 min_video_duration_seconds: 60
-max_video_duration_seconds: 1800
+max_video_duration_seconds: 7200
 
 # Optional: audio-based scoring to rank candidate clips
 enable_audio_scoring: false
