@@ -53,7 +53,7 @@ python -m src.main chunk
 # Full pipeline: download + chunk + optional audio scoring
 python -m src.main run
 
-# Score: rank existing candidate clips by audio energy (no download/chunk)
+# Score: rank existing candidates by audio, then copy top-K MP4s to data/outputs/ranked/
 python -m src.main score
 
 # Refresh: delete all candidate clips and their manifests (keeps source videos in data/videos/)
@@ -86,12 +86,13 @@ All output lives under `./data/` (gitignored):
 data/
   videos/              # Downloaded source videos (<video_id>.mp4)
   candidates/          # Candidate clips per video (<video_id>/<video_id>_t{start_ms}_{end_ms}.mp4)
-  outputs/             # Reserved for later (final vertical exports)
+  outputs/
+    ranked/            # Top-K ranked clip MP4s (copied when you run score)
   logs/                # run.log
   manifests/
     videos/            # JSON metadata per downloaded video
     candidates/        # JSON manifest of clips per video
-    candidates_ranked/ # When audio scoring enabled: top-K per video
+    candidates_ranked/ # Top-K per video (used by score; outputs/ranked gets the MP4s)
 ```
 
 After a run, the CLI prints a short summary: number of videos, number of clips, and paths.

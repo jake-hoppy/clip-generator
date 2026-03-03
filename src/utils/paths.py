@@ -30,6 +30,11 @@ def outputs_dir() -> Path:
     return data_root() / "outputs"
 
 
+def outputs_ranked_dir() -> Path:
+    """Top-K ranked clip MP4s (copies): data/outputs/ranked/"""
+    return data_root() / "outputs" / "ranked"
+
+
 def logs_dir() -> Path:
     """Log files: data/logs/"""
     return data_root() / "logs"
@@ -97,6 +102,7 @@ def ensure_data_dirs() -> None:
         videos_dir(),
         candidates_dir(),
         outputs_dir(),
+        outputs_ranked_dir(),
         logs_dir(),
         manifests_dir(),
         manifests_videos_dir(),

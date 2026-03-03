@@ -8,7 +8,17 @@ from pathlib import Path
 
 from src.utils.paths import project_root
 from src.utils.logging_setup import setup_logging
-from src.pipeline import load_config, run_download, run_chunk, run_audio_score, run_full, run_refresh, print_summary
+from src.pipeline import (
+    load_config,
+    run_download,
+    run_chunk,
+    run_audio_score,
+    run_full,
+    run_refresh,
+    copy_ranked_clips_to_output,
+    print_summary,
+)
+from src.utils.paths import outputs_ranked_dir
 from src.media.ffmpeg import require_ffmpeg
 
 
@@ -45,11 +55,16 @@ def cmd_run(args: argparse.Namespace, config: dict) -> None:
 
 
 def cmd_score(args: argparse.Namespace, config: dict) -> None:
-    """Rank existing candidates by audio energy (no download/chunk)."""
+    """Rank existing candidates by audio energy (no download/chunk), then copy top-K MP4s to data/outputs/ranked/."""
     # Force scoring on; use config for top_k
     config_score = {**config, "enable_audio_scoring": True}
     ranked = run_audio_score(config_score, dry_run=args.dry_run)
     total_ranked = sum(len(clips) for clips in ranked.values())
+    copied = 0
+    if not args.dry_run and ranked:
+        copied = copy_ranked_clips_to_output(dry_run=False)
+    elif args.dry_run and ranked:
+        copied = copy_ranked_clips_to_output(dry_run=True)
     print("\n" + "=" * 60)
     print("SCORE (audio ranking of existing candidates)")
     print("=" * 60)
@@ -58,6 +73,8 @@ def cmd_score(args: argparse.Namespace, config: dict) -> None:
     print(f"  Videos scored:    {len(ranked)}")
     print(f"  Top-K clips:      {total_ranked}")
     print(f"  Ranked manifests: data/manifests/candidates_ranked/")
+    if copied:
+        print(f"  Output MP4s:      {copied} copied to {outputs_ranked_dir()}")
     print("=" * 60)
 
 

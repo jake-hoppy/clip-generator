@@ -2,6 +2,7 @@
 Orchestrates pipeline steps: download -> chunk -> (optional) audio score.
 Loads config from YAML; supports dry-run and limit overrides.
 """
+import json
 import logging
 import shutil
 from pathlib import Path
@@ -18,6 +19,7 @@ from src.utils.paths import (
     manifests_videos_dir,
     manifests_candidates_dir,
     manifests_candidates_ranked_dir,
+    outputs_ranked_dir,
 )
 from src.utils.logging_setup import setup_logging
 from src.media.ffmpeg import require_ffmpeg
@@ -148,6 +150,43 @@ def run_refresh(dry_run: bool = False) -> tuple[int, int]:
     if not dry_run:
         logger.info("Refresh: removed %d clip dirs, %d manifest files", clips_removed, manifests_removed)
     return clips_removed, manifests_removed
+
+
+def copy_ranked_clips_to_output(dry_run: bool = False) -> int:
+    """
+    Copy top-K ranked clip MP4s from candidates into data/outputs/ranked/.
+    Reads each data/manifests/candidates_ranked/*.json and copies each clip's file.
+    Returns number of files copied. Fast (file copy only, no re-encode).
+    """
+    ensure_data_dirs()
+    rank_dir = manifests_candidates_ranked_dir()
+    out_dir = outputs_ranked_dir()
+    if not rank_dir.exists():
+        return 0
+    copied = 0
+    for mpath in rank_dir.glob("*.json"):
+        try:
+            with open(mpath, encoding="utf-8") as f:
+                data = json.load(f)
+        except (json.JSONDecodeError, OSError) as e:
+            logger.warning("Skip %s: %s", mpath, e)
+            continue
+        for clip in data.get("clips_ranked", []):
+            src = Path(clip.get("filepath", ""))
+            if not src or not src.exists():
+                continue
+            clip_id = clip.get("clip_id", src.stem)
+            dest = out_dir / f"{clip_id}.mp4"
+            if dry_run:
+                logger.info("Would copy %s -> %s", src.name, dest)
+                copied += 1
+                continue
+            out_dir.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(src, dest)
+            copied += 1
+    if not dry_run and copied:
+        logger.info("Copied %d ranked clip(s) to %s", copied, out_dir)
+    return copied
 
 
 def print_summary(
