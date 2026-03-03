@@ -15,11 +15,12 @@ from src.utils.paths import (
     data_root,
     videos_dir,
     candidates_dir,
+    candidates_dir_for_video,
+    candidates_ranked_dir,
     manifests_dir,
     manifests_videos_dir,
     manifests_candidates_dir,
     manifests_candidates_ranked_dir,
-    outputs_ranked_dir,
 )
 from src.media.ffmpeg import require_ffmpeg, extract_clip
 from src.youtube.search_download import build_video_pool, VideoMeta
@@ -87,9 +88,10 @@ def run_loud(
     dry_run: bool = False,
 ) -> list[dict]:
     """
-    Detect loud moments per video (audio peak detection), rank all segments globally by loudness,
-    take top N (config: top_n_loud_global), extract those clips to data/outputs/ranked/.
-    Does not use fixed-window chunking or data/candidates/.
+    Detect loud moments per video (audio peak detection). Extract all candidate clips to
+    data/candidates/<video_id>/, write manifests to data/manifests/candidates/. Rank globally
+    by loudness, take top N; copy those to data/candidates_ranked/ and write
+    data/manifests/candidates_ranked/top_loud_manifest.json. Leave data/outputs/ empty for later.
     """
     require_ffmpeg()
     ensure_data_dirs()
@@ -99,7 +101,9 @@ def run_loud(
     min_peak_distance = float(config.get("loud_min_peak_distance_seconds", 20))
 
     manifests_videos_dir().mkdir(parents=True, exist_ok=True)
+    manifests_candidates_dir().mkdir(parents=True, exist_ok=True)
     all_segments: list[dict] = []
+
     for mpath in manifests_videos_dir().glob("*.json"):
         video_id = mpath.stem
         video_path = _resolve_video_path(video_id)
@@ -114,12 +118,41 @@ def run_loud(
                 peaks_per_video=peaks_per_video,
                 min_peak_distance_sec=min_peak_distance,
             )
-            for seg in segments:
-                seg["_video_path"] = video_path
-            all_segments.extend(segments)
         except Exception as e:
             logger.warning("Loud segments failed for %s: %s", video_id, e)
             continue
+
+        for seg in segments:
+            seg["_video_path"] = video_path
+            clip_id = seg["clip_id"]
+            cand_path = candidates_dir_for_video(video_id) / f"{clip_id}.mp4"
+            seg["filepath"] = str(cand_path)
+            if dry_run:
+                all_segments.append(seg)
+                continue
+            cand_path.parent.mkdir(parents=True, exist_ok=True)
+            try:
+                extract_clip(
+                    video_path,
+                    cand_path,
+                    seg["start_sec"],
+                    seg["duration_seconds"],
+                    use_stream_copy=True,
+                )
+            except Exception as e:
+                logger.warning("Extract failed %s: %s", clip_id, e)
+                continue
+            all_segments.append(seg)
+
+        if not dry_run and segments:
+            manifest_data = {
+                "video_id": video_id,
+                "clip_length_seconds": clip_length,
+                "clips": [{k: v for k, v in s.items() if k != "_video_path"} for s in segments],
+            }
+            manifest_path = manifests_candidates_dir() / f"{video_id}.json"
+            with open(manifest_path, "w", encoding="utf-8") as f:
+                json.dump(manifest_data, f, indent=2)
 
     all_segments.sort(key=lambda s: s["score"], reverse=True)
     top = all_segments[:top_n]
@@ -128,34 +161,32 @@ def run_loud(
         return []
 
     if dry_run:
-        logger.info("Would extract top %d loud clips to %s", len(top), outputs_ranked_dir())
+        logger.info("Would write candidates to %s, top %d to %s", candidates_dir(), len(top), candidates_ranked_dir())
         return top
 
-    out_dir = outputs_ranked_dir()
-    out_dir.mkdir(parents=True, exist_ok=True)
+    rank_dir = candidates_ranked_dir()
+    rank_dir.mkdir(parents=True, exist_ok=True)
     manifest_list = []
     for i, seg in enumerate(top, start=1):
-        video_path = seg.get("_video_path")
-        if not video_path:
+        src = Path(seg["filepath"])
+        if not src.exists():
             continue
-        start_sec = seg["start_sec"]
-        end_sec = seg["end_sec"]
-        duration_sec = end_sec - start_sec
         out_name = f"rank_{i:03d}_{seg['clip_id']}.mp4"
-        out_path = out_dir / out_name
+        out_path = rank_dir / out_name
         try:
-            extract_clip(video_path, out_path, start_sec, duration_sec, use_stream_copy=True)
+            shutil.copy2(src, out_path)
         except Exception as e:
-            logger.warning("Extract failed %s: %s", out_name, e)
+            logger.warning("Copy failed %s: %s", out_name, e)
             continue
         entry = {k: v for k, v in seg.items() if k != "_video_path"}
         entry["filepath"] = str(out_path)
         manifest_list.append(entry)
 
-    manifest_path = out_dir / "top_loud_manifest.json"
+    manifest_path = manifests_candidates_ranked_dir() / "top_loud_manifest.json"
+    manifests_candidates_ranked_dir().mkdir(parents=True, exist_ok=True)
     with open(manifest_path, "w", encoding="utf-8") as f:
         json.dump({"top_n": top_n, "clips": manifest_list}, f, indent=2)
-    logger.info("Wrote %d loud clips to %s", len(manifest_list), out_dir)
+    logger.info("Wrote candidates to %s, top %d ranked to %s", candidates_dir(), len(manifest_list), rank_dir)
     return manifest_list
 
 
@@ -192,9 +223,20 @@ def run_refresh(dry_run: bool = False) -> tuple[int, int]:
                 manifests_removed += 1
 
     # Remove ranked manifests (data/manifests/candidates_ranked/*.json)
-    rank_dir = manifests_candidates_ranked_dir()
-    if rank_dir.exists():
-        for f in rank_dir.glob("*.json"):
+    rank_manifest_dir = manifests_candidates_ranked_dir()
+    if rank_manifest_dir.exists():
+        for f in rank_manifest_dir.glob("*.json"):
+            if dry_run:
+                manifests_removed += 1
+                logger.info("Would remove %s", f)
+            else:
+                f.unlink(missing_ok=True)
+                manifests_removed += 1
+
+    # Remove ranked clip files (data/candidates_ranked/*.mp4)
+    rank_clips_dir = candidates_ranked_dir()
+    if rank_clips_dir.exists():
+        for f in rank_clips_dir.glob("*.mp4"):
             if dry_run:
                 manifests_removed += 1
                 logger.info("Would remove %s", f)
@@ -235,5 +277,6 @@ def print_run_summary(
     print(f"  Loud clips:         {len(loud_clips)} (top globally)")
     print(f"\n  Data root:          {data_root()}")
     print(f"  Videos:             {videos_dir()}")
-    print(f"  Output (ranked):    {outputs_ranked_dir()}")
+    print(f"  Candidates:        {candidates_dir()}")
+    print(f"  Candidates (ranked): {candidates_ranked_dir()}")
     print("=" * 60)

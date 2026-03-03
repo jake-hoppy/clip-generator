@@ -25,13 +25,18 @@ def candidates_dir() -> Path:
     return data_root() / "candidates"
 
 
+def candidates_ranked_dir() -> Path:
+    """Top-N ranked clip MP4s: data/candidates_ranked/ (outputs/ reserved for final results later)"""
+    return data_root() / "candidates_ranked"
+
+
 def outputs_dir() -> Path:
     """Reserved for final formatted vertical exports: data/outputs/"""
     return data_root() / "outputs"
 
 
 def outputs_ranked_dir() -> Path:
-    """Top-K ranked clip MP4s (copies): data/outputs/ranked/"""
+    """Reserved for final results later; prefer candidates_ranked_dir() for ranked clips."""
     return data_root() / "outputs" / "ranked"
 
 
@@ -101,6 +106,7 @@ def ensure_data_dirs() -> None:
         data_root(),
         videos_dir(),
         candidates_dir(),
+        candidates_ranked_dir(),
         outputs_dir(),
         outputs_ranked_dir(),
         logs_dir(),

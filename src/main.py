@@ -17,7 +17,7 @@ from src.pipeline import (
     print_summary,
     print_run_summary,
 )
-from src.utils.paths import outputs_ranked_dir
+from src.utils.paths import candidates_ranked_dir
 from src.media.ffmpeg import require_ffmpeg
 
 
@@ -58,7 +58,7 @@ def cmd_loud(args: argparse.Namespace, config: dict) -> None:
     if args.dry_run:
         print("  (dry run — no files written)")
     print(f"  Clips extracted:  {len(clips)}")
-    print(f"  Output:           {outputs_ranked_dir()}")
+    print(f"  Output:           {candidates_ranked_dir()}")
     print("=" * 60)
 
 

@@ -82,11 +82,14 @@ All output lives under `./data/` (gitignored):
 ```
 data/
   videos/              # Downloaded source videos (<video_id>.mp4)
-  outputs/
-    ranked/            # Top N loudest clip MP4s (rank_001_..., rank_002_..., top_loud_manifest.json)
+  candidates/          # All extracted loud-moment clips per video (<video_id>/<clip_id>.mp4)
+  candidates_ranked/   # Top N ranked clip MP4s (rank_001_..., rank_002_...)
+  outputs/             # Reserved for final results later (empty for now)
   logs/                # run.log
   manifests/
     videos/            # JSON metadata per downloaded video
+    candidates/        # One JSON per video listing its candidate clips
+    candidates_ranked/ # top_loud_manifest.json (top N clips and paths)
 ```
 
 After a run, the CLI prints a short summary: number of videos, number of clips, and paths.
@@ -102,13 +105,12 @@ results_per_query: 10
 max_videos_total: 25
 download_format: "mp4"
 clip_length_seconds: 18
-clip_step_seconds: 12
-allow_final_short_chunk: false
 min_video_duration_seconds: 60
 max_video_duration_seconds: 1800
-enable_audio_scoring: false
-top_k_per_video: 5
 seed: 42
+top_n_loud_global: 20
+loud_peaks_per_video: 50
+loud_min_peak_distance_seconds: 20
 ```
 
 ## Troubleshooting
