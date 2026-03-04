@@ -42,3 +42,6 @@ Thumbs.db
 
 # Local config overrides (optional)
 config/local*.yaml
+
+# Secrets (never commit)
+.env

@@ -1,5 +1,5 @@
 """
-Orchestrates pipeline steps: download -> loud (top N loud moments globally).
+Orchestrates pipeline steps: download -> Whisper segments + OpenAI ranking.
 Loads config from YAML; supports dry-run and limit overrides.
 """
 import json
@@ -24,7 +24,8 @@ from src.utils.paths import (
 )
 from src.media.ffmpeg import require_ffmpeg, extract_clip
 from src.youtube.search_download import build_video_pool, VideoMeta
-from src.media.audio_peaks import get_loud_segments_for_video
+from src.ai.whisper_segments import get_whisper_segments
+from src.ai.openai_score import score_segment
 from src.utils.paths import video_file_path
 
 logger = logging.getLogger(__name__)
@@ -67,10 +68,10 @@ def run_full(
     limit_videos: int | None = None,
     limit_queries: int | None = None,
 ) -> tuple[list[VideoMeta], list[dict]]:
-    """Run full pipeline: download -> loud (top N loud moments across all videos)."""
+    """Run full pipeline: download -> Whisper segments + OpenAI ranking (top N globally)."""
     videos = run_download(config, dry_run=dry_run, limit_videos=limit_videos, limit_queries=limit_queries)
-    loud_clips = run_loud(config, dry_run=dry_run)
-    return videos, loud_clips
+    ranked_clips = run_whisper_rank(config, dry_run=dry_run)
+    return videos, ranked_clips
 
 
 def _resolve_video_path(video_id: str) -> Path | None:
@@ -83,22 +84,23 @@ def _resolve_video_path(video_id: str) -> Path | None:
     return None
 
 
-def run_loud(
+def run_whisper_rank(
     config: dict[str, Any],
     dry_run: bool = False,
 ) -> list[dict]:
     """
-    Detect loud moments per video (audio peak detection). Extract all candidate clips to
-    data/candidates/<video_id>/, write manifests to data/manifests/candidates/. Rank globally
-    by loudness, take top N; copy those to data/candidates_ranked/ and write
-    data/manifests/candidates_ranked/top_loud_manifest.json. Leave data/outputs/ empty for later.
+    Get segments from Whisper API per video, score each with OpenAI (gpt-4o-mini), rank globally.
+    Extract all segments to data/candidates/<video_id>/, write manifests to data/manifests/candidates/.
+    Take top N by score; copy to data/candidates_ranked/ and write manifest. Leave data/outputs/ empty.
     """
     require_ffmpeg()
     ensure_data_dirs()
-    clip_length = float(config.get("clip_length_seconds", 18))
-    top_n = int(config.get("top_n_loud_global", 20))
-    peaks_per_video = int(config.get("loud_peaks_per_video", 50))
-    min_peak_distance = float(config.get("loud_min_peak_distance_seconds", 20))
+    top_n = int(config.get("top_n_global", 20))
+    min_duration = float(config.get("segment_min_duration_seconds", 12.0))
+    max_duration = float(config.get("segment_max_duration_seconds", 20.0))
+    whisper_model = config.get("whisper_model", "whisper-1")
+    openai_model = config.get("openai_model", "gpt-4o-mini")
+    openai_prompt = config.get("openai_prompt")  # None = use default in openai_score
 
     manifests_videos_dir().mkdir(parents=True, exist_ok=True)
     manifests_candidates_dir().mkdir(parents=True, exist_ok=True)
@@ -111,22 +113,51 @@ def run_loud(
             logger.warning("No video file for %s, skipping", video_id)
             continue
         try:
-            segments = get_loud_segments_for_video(
+            with open(mpath, encoding="utf-8") as f:
+                video_meta = json.load(f)
+            video_title = video_meta.get("title") or ""
+        except Exception:
+            video_title = ""
+
+        try:
+            raw_segments = get_whisper_segments(
                 video_path,
                 video_id,
-                clip_length_sec=clip_length,
-                peaks_per_video=peaks_per_video,
-                min_peak_distance_sec=min_peak_distance,
+                min_duration_sec=min_duration,
+                max_duration_sec=max_duration,
+                model=whisper_model,
             )
         except Exception as e:
-            logger.warning("Loud segments failed for %s: %s", video_id, e)
+            logger.warning("Whisper failed for %s: %s", video_id, e)
             continue
 
-        for seg in segments:
+        this_video_manifest_clips: list[dict] = []
+        for seg in raw_segments:
+            start_ms = int(seg["start_sec"] * 1000)
+            end_ms = int(seg["end_sec"] * 1000)
+            clip_id = f"{video_id}_t{start_ms}_{end_ms}"
+            seg["video_id"] = video_id
+            seg["clip_id"] = clip_id
             seg["_video_path"] = video_path
-            clip_id = seg["clip_id"]
+            seg["_video_title"] = video_title
             cand_path = candidates_dir_for_video(video_id) / f"{clip_id}.mp4"
             seg["filepath"] = str(cand_path)
+
+            if not dry_run:
+                try:
+                    score = score_segment(
+                        seg["text"],
+                        video_title=video_title or None,
+                        model=openai_model,
+                        prompt_override=openai_prompt,
+                    )
+                except Exception as e:
+                    logger.warning("Scoring failed for %s: %s", clip_id, e)
+                    score = 0.0
+                seg["score"] = round(score, 2)
+            else:
+                seg["score"] = 0.0
+
             if dry_run:
                 all_segments.append(seg)
                 continue
@@ -142,13 +173,13 @@ def run_loud(
             except Exception as e:
                 logger.warning("Extract failed %s: %s", clip_id, e)
                 continue
+            this_video_manifest_clips.append({k: v for k, v in seg.items() if k not in ("_video_path", "_video_title")})
             all_segments.append(seg)
 
-        if not dry_run and segments:
+        if not dry_run and this_video_manifest_clips:
             manifest_data = {
                 "video_id": video_id,
-                "clip_length_seconds": clip_length,
-                "clips": [{k: v for k, v in s.items() if k != "_video_path"} for s in segments],
+                "clips": this_video_manifest_clips,
             }
             manifest_path = manifests_candidates_dir() / f"{video_id}.json"
             with open(manifest_path, "w", encoding="utf-8") as f:
@@ -157,7 +188,7 @@ def run_loud(
     all_segments.sort(key=lambda s: s["score"], reverse=True)
     top = all_segments[:top_n]
     if not top:
-        logger.info("No loud segments found")
+        logger.info("No segments found")
         return []
 
     if dry_run:
@@ -178,11 +209,11 @@ def run_loud(
         except Exception as e:
             logger.warning("Copy failed %s: %s", out_name, e)
             continue
-        entry = {k: v for k, v in seg.items() if k != "_video_path"}
+        entry = {k: v for k, v in seg.items() if k not in ("_video_path", "_video_title")}
         entry["filepath"] = str(out_path)
         manifest_list.append(entry)
 
-    manifest_path = manifests_candidates_ranked_dir() / "top_loud_manifest.json"
+    manifest_path = manifests_candidates_ranked_dir() / "top_ranked_manifest.json"
     manifests_candidates_ranked_dir().mkdir(parents=True, exist_ok=True)
     with open(manifest_path, "w", encoding="utf-8") as f:
         json.dump({"top_n": top_n, "clips": manifest_list}, f, indent=2)
@@ -264,17 +295,17 @@ def print_summary(videos: list[VideoMeta], dry_run: bool) -> None:
 
 def print_run_summary(
     videos: list[VideoMeta],
-    loud_clips: list[dict],
+    ranked_clips: list[dict],
     dry_run: bool,
 ) -> None:
-    """Print summary for full run (download + loud)."""
+    """Print summary for full run (download + Whisper + OpenAI ranking)."""
     print("\n" + "=" * 60)
-    print("CLIP-FARM SUMMARY (download + top loud moments)")
+    print("CLIP-FARM SUMMARY (download + Whisper segments + OpenAI ranking)")
     print("=" * 60)
     if dry_run:
         print("(dry run — no files written)")
     print(f"  Videos in pool:     {len(videos)}")
-    print(f"  Loud clips:         {len(loud_clips)} (top globally)")
+    print(f"  Ranked clips:       {len(ranked_clips)} (top globally)")
     print(f"\n  Data root:          {data_root()}")
     print(f"  Videos:             {videos_dir()}")
     print(f"  Candidates:        {candidates_dir()}")

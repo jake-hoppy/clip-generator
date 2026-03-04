@@ -1,4 +1,4 @@
-# clip-farm pipeline configuration (MVP v0/v1)
+# clip-farm pipeline configuration (Whisper + OpenAI ranking)
 
 # Search queries (yt-dlp will search YouTube for each)
 queries:
@@ -17,9 +17,6 @@ max_videos_total: 25
 # Download format (prefer mp4 for compatibility)
 download_format: "mp4"
 
-# Clip length for loud-moment segments (seconds)
-clip_length_seconds: 18
-
 # Filter source videos by duration (seconds)
 min_video_duration_seconds: 60
 max_video_duration_seconds: 1800
@@ -27,7 +24,16 @@ max_video_duration_seconds: 1800
 # Deterministic ordering for download (optional)
 seed: 42
 
-# Loud moments: find peaks per video, take top N globally
-top_n_loud_global: 20
-loud_peaks_per_video: 50
-loud_min_peak_distance_seconds: 20
+# Whisper: segment boundaries from transcription (merge into this duration range)
+segment_min_duration_seconds: 12.0
+segment_max_duration_seconds: 20.0
+
+# Ranking: take top N segments globally (by OpenAI score)
+top_n_global: 20
+
+# Whisper API model
+whisper_model: "whisper-1"
+
+# OpenAI: model and optional custom prompt for scoring (1-10)
+openai_model: "gpt-4o-mini"
+# openai_prompt: "..."  # optional; default asks for viral/funny clip potential 1-10

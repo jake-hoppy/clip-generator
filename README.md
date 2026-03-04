@@ -1,6 +1,6 @@
 # clip-farm
 
-Build a pool of short vertical-ready clips from multiple YouTube videos: search + download, then extract the **top N loudest moments** across all videos (audio peak detection) into `data/outputs/ranked/`.
+Build a pool of short vertical-ready clips from multiple YouTube videos: search + download, then use **Whisper** for segment boundaries and **OpenAI (gpt-4o-mini)** to score and rank segments. Top N clips go to `data/candidates_ranked/`.
 
 ## Prerequisites
 
@@ -9,6 +9,7 @@ Build a pool of short vertical-ready clips from multiple YouTube videos: search 
 - **FFmpeg** (must be installed separately; not a pip package)
   - macOS: `brew install ffmpeg`
   - Ubuntu/Debian: `sudo apt install ffmpeg`
+- **OpenAI API key** (for Whisper transcription and GPT scoring)
 
 ## Setup
 
@@ -17,7 +18,14 @@ cd clip-farm
 pip install -r requirements.txt
 ```
 
-Optional: use a virtual environment so `yt-dlp` is on PATH when the script runs:
+Copy the example env file and add your OpenAI API key (never commit `.env`):
+
+```bash
+cp .env.example .env
+# Edit .env and set: OPENAI_API_KEY=sk-your-key-here
+```
+
+Optional: use a virtual environment:
 
 ```bash
 python3 -m venv .venv
@@ -29,15 +37,15 @@ pip install -r requirements.txt
 
 Edit `config/config.yaml` to set:
 
-- **queries** – list of YouTube search queries (e.g. `"friends funniest moments"`)
+- **queries** – list of YouTube search queries
 - **urls** – optional list of direct YouTube URLs
-- **results_per_query** – how many search results per query (e.g. 10)
-- **max_videos_total** – cap on total source videos (e.g. 25)
+- **results_per_query** / **max_videos_total** – how many videos to download
 - **min_video_duration_seconds** / **max_video_duration_seconds** – filter source videos by duration
-- **clip_length_seconds** – length of each extracted clip around a loud peak (e.g. 18)
-- **top_n_loud_global** – number of loudest clips to keep globally across all videos (e.g. 20)
-- **loud_peaks_per_video** – max loud-moment peaks to consider per video before ranking (e.g. 50)
-- **loud_min_peak_distance_seconds** – minimum seconds between peak centers (e.g. 20)
+- **segment_min_duration_seconds** / **segment_max_duration_seconds** – target length for merged Whisper segments (e.g. 12–20 s)
+- **top_n_global** – number of top-ranked clips to keep globally (e.g. 20)
+- **whisper_model** – Whisper API model (default: `whisper-1`)
+- **openai_model** – model for scoring (default: `gpt-4o-mini`)
+- **openai_prompt** – optional; override the default scoring prompt (rate 1–10 for viral/clip potential)
 
 ## How to run
 
@@ -47,13 +55,13 @@ From the **project root** (`clip-farm/`):
 # Download only (build video pool from queries + URLs)
 python -m src.main download
 
-# Full pipeline: download + find top N loud moments across all videos → data/outputs/ranked/
+# Full pipeline: download + Whisper segments + OpenAI ranking → top N to data/candidates_ranked/
 python -m src.main run
 
-# Loud only: find top N loud moments from already-downloaded videos, extract to data/outputs/ranked/
-python -m src.main loud
+# Rank only: Whisper + OpenAI on already-downloaded videos; top N to data/candidates_ranked/
+python -m src.main rank
 
-# Refresh: delete old candidate data (keeps source videos); then run or loud to regenerate
+# Refresh: delete candidate/ranked clips and manifests (keeps source videos); run or rank to regenerate
 python -m src.main refresh
 ```
 
@@ -68,11 +76,9 @@ python -m src.main refresh
 Examples:
 
 ```bash
-python -m src.main run --limit-videos 3 --limit-queries 1   # 3 videos, 1 query, then top 20 loud
-python -m src.main download --limit-videos 5 --limit-queries 1
-python -m src.main run --verbose
-python -m src.main loud                # top 20 loud moments from existing downloads (uses top_n_loud_global)
-python -m src.main refresh --dry-run   # show what would be deleted without deleting
+python -m src.main run --limit-videos 3 --limit-queries 1
+python -m src.main rank
+python -m src.main refresh --dry-run
 ```
 
 ## Output layout
@@ -82,56 +88,41 @@ All output lives under `./data/` (gitignored):
 ```
 data/
   videos/              # Downloaded source videos (<video_id>.mp4)
-  candidates/          # All extracted loud-moment clips per video (<video_id>/<clip_id>.mp4)
+  candidates/          # All extracted segments per video (<video_id>/<clip_id>.mp4)
   candidates_ranked/   # Top N ranked clip MP4s (rank_001_..., rank_002_...)
   outputs/             # Reserved for final results later (empty for now)
   logs/                # run.log
   manifests/
     videos/            # JSON metadata per downloaded video
-    candidates/        # One JSON per video listing its candidate clips
-    candidates_ranked/ # top_loud_manifest.json (top N clips and paths)
+    candidates/        # One JSON per video listing its candidate segments
+    candidates_ranked/ # top_ranked_manifest.json (top N clips and paths)
 ```
 
-After a run, the CLI prints a short summary: number of videos, number of clips, and paths.
+## API key
 
-## Example config
-
-```yaml
-queries:
-  - "friends funniest moments"
-  - "the office best moments"
-urls: []
-results_per_query: 10
-max_videos_total: 25
-download_format: "mp4"
-clip_length_seconds: 18
-min_video_duration_seconds: 60
-max_video_duration_seconds: 1800
-seed: 42
-top_n_loud_global: 20
-loud_peaks_per_video: 50
-loud_min_peak_distance_seconds: 20
-```
+Set **OPENAI_API_KEY** in your environment or in a `.env` file in the project root. The app loads `.env` automatically (via `python-dotenv`). Do not commit `.env`; it is in `.gitignore`. Use `.env.example` as a template.
 
 ## Troubleshooting
 
+### OPENAI_API_KEY not set
+
+- Create `.env` from `.env.example` and set `OPENAI_API_KEY=sk-...`
+- Or: `export OPENAI_API_KEY='sk-...'` in your shell before running.
+
 ### FFmpeg missing
 
-**Error:** `ffmpeg is not installed or not on PATH`
-
-- Install FFmpeg: `brew install ffmpeg` (macOS) or `sudo apt install ffmpeg` (Linux).
-- Ensure `ffmpeg` and `ffprobe` are on your PATH: `which ffmpeg` and `which ffprobe`.
+- Install: `brew install ffmpeg` (macOS) or `sudo apt install ffmpeg` (Linux).
+- Ensure `ffmpeg` and `ffprobe` are on PATH: `which ffmpeg` and `which ffprobe`.
 
 ### yt-dlp errors
 
-- **No results / search fails:** Check queries and network. Try a direct URL in `urls` to confirm yt-dlp works.
-- **Rate limits / 429:** Reduce `results_per_query` or `max_videos_total`; add short delays if you extend the script.
-- **Install/version:** `pip install -U yt-dlp`
+- No results: check queries and network. Try a direct URL in `urls`.
+- Rate limits: reduce `results_per_query` or `max_videos_total`.
+- Upgrade: `pip install -U yt-dlp`
 
-### Chunk step finds no videos
+### Rank step finds no videos
 
-- Run `download` first (or ensure `data/manifests/videos/` contains JSON manifests for the videos you expect).
-- Chunk only processes videos that have both a manifest and a file in `data/videos/`.
+- Run `download` first (or ensure `data/manifests/videos/` has JSON manifests and `data/videos/` has the video files).
 
 ### Logs
 
@@ -140,6 +131,7 @@ loud_min_peak_distance_seconds: 20
 
 ## Design notes
 
-- **Idempotent:** Re-running download skips videos that already have a file + manifest; re-running chunk skips videos that already have a full candidates manifest and clip files.
-- **Extensible:** Layout and modules are set up so you can add Whisper/LLM later under e.g. `src/ai/` without changing the core pipeline.
+- **Segments:** Whisper API returns timestamped segments; they are merged into chunks of roughly 12–20 s (configurable).
+- **Scoring:** Each segment’s text (and optional video title) is sent to the configured OpenAI model with a prompt that asks for a 1–10 score for viral/clip potential; the response is parsed to a number.
+- **Idempotency:** Re-running download skips videos that already have a file + manifest. Re-running rank overwrites candidates and ranked output.
 - **No database:** All metadata is stored as JSON in `data/manifests/`.

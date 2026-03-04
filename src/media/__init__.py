@@ -1,1 +1,1 @@
-# Media processing (ffmpeg, chunking, audio scoring)
+# Media processing (ffmpeg, clip extraction)

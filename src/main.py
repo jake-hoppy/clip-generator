@@ -1,10 +1,12 @@
 """
 CLI entry for clip-farm.
-Subcommands: download | run | loud | refresh
+Subcommands: download | run | rank | refresh
 """
 import argparse
 import sys
 from pathlib import Path
+
+from dotenv import load_dotenv
 
 from src.utils.paths import project_root
 from src.utils.logging_setup import setup_logging
@@ -12,7 +14,7 @@ from src.pipeline import (
     load_config,
     run_download,
     run_full,
-    run_loud,
+    run_whisper_rank,
     run_refresh,
     print_summary,
     print_run_summary,
@@ -39,25 +41,25 @@ def cmd_download(args: argparse.Namespace, config: dict) -> None:
 
 
 def cmd_run(args: argparse.Namespace, config: dict) -> None:
-    """Full pipeline: download + loud (top N loud moments across all videos)."""
-    videos, loud_clips = run_full(
+    """Full pipeline: download + Whisper segments + OpenAI ranking (top N globally)."""
+    videos, ranked_clips = run_full(
         config,
         dry_run=args.dry_run,
         limit_videos=getattr(args, "limit_videos", None),
         limit_queries=getattr(args, "limit_queries", None),
     )
-    print_run_summary(videos, loud_clips, args.dry_run)
+    print_run_summary(videos, ranked_clips, args.dry_run)
 
 
-def cmd_loud(args: argparse.Namespace, config: dict) -> None:
-    """Detect loud moments per video, take top N globally, extract to data/outputs/ranked/."""
-    clips = run_loud(config, dry_run=args.dry_run)
+def cmd_rank(args: argparse.Namespace, config: dict) -> None:
+    """Whisper segments + OpenAI scoring; take top N globally, extract to candidates_ranked/."""
+    clips = run_whisper_rank(config, dry_run=args.dry_run)
     print("\n" + "=" * 60)
-    print("LOUD (top loud moments across all videos)")
+    print("RANK (Whisper segments + OpenAI scoring, top N globally)")
     print("=" * 60)
     if args.dry_run:
         print("  (dry run — no files written)")
-    print(f"  Clips extracted:  {len(clips)}")
+    print(f"  Clips ranked:     {len(clips)}")
     print(f"  Output:           {candidates_ranked_dir()}")
     print("=" * 60)
 
@@ -72,7 +74,7 @@ def cmd_refresh(args: argparse.Namespace, config: dict) -> None:
     print(f"  Clip dirs removed:     {clips_dirs}")
     print(f"  Manifest files removed: {manifest_files}")
     print("  Source videos in data/videos/ were kept.")
-    print("  Run 'run' or 'loud' to regenerate top loud clips.")
+    print("  Run 'run' or 'rank' to regenerate top ranked clips.")
     print("=" * 60)
 
 
@@ -98,33 +100,34 @@ def main() -> int:
     p_dl.add_argument("--dry-run", action="store_true", help="Do not write files")
     p_dl.set_defaults(func=cmd_download)
 
-    # run (download + loud: top N loud moments globally)
+    # run (download + Whisper + OpenAI rank: top N globally)
     p_run = subparsers.add_parser(
         "run",
-        help="Full pipeline: download videos, then find top N loudest moments across all videos and extract to data/outputs/ranked/.",
+        help="Full pipeline: download videos, then Whisper segments + OpenAI scoring; top N to data/candidates_ranked/.",
     )
     p_run.add_argument("--limit-videos", type=int, default=None, help="Override max_videos_total")
     p_run.add_argument("--limit-queries", type=int, default=None, help="Limit number of queries to run")
     p_run.add_argument("--dry-run", action="store_true", help="Do not write files")
     p_run.set_defaults(func=cmd_run)
 
-    # loud (peak detection on already-downloaded videos -> top N globally -> outputs/ranked/)
-    p_loud = subparsers.add_parser(
-        "loud",
-        help="Find loudest moments per video, take top N globally (config: top_n_loud_global), extract to data/outputs/ranked/.",
+    # rank (Whisper + OpenAI on already-downloaded videos -> top N globally)
+    p_rank = subparsers.add_parser(
+        "rank",
+        help="Whisper segments + OpenAI scoring on downloaded videos; top N to data/candidates_ranked/.",
     )
-    p_loud.add_argument("--dry-run", action="store_true", help="Do not extract clips")
-    p_loud.set_defaults(func=cmd_loud)
+    p_rank.add_argument("--dry-run", action="store_true", help="Do not extract clips")
+    p_rank.set_defaults(func=cmd_rank)
 
     # refresh
     p_refresh = subparsers.add_parser(
         "refresh",
-        help="Delete candidate clips and manifests from old runs (if any); keep source videos. Run run/loud to regenerate.",
+        help="Delete candidate clips and manifests from old runs (if any); keep source videos. Run run/rank to regenerate.",
     )
     p_refresh.add_argument("--dry-run", action="store_true", help="Only log what would be deleted")
     p_refresh.set_defaults(func=cmd_refresh)
 
     args = parser.parse_args()
+    load_dotenv(project_root() / ".env")
     setup_logging(verbose=args.verbose)
 
     try:
@@ -133,7 +136,7 @@ def main() -> int:
         print(f"Error: {e}", file=sys.stderr)
         return 1
 
-    if args.command in ("run", "loud"):
+    if args.command in ("run", "rank"):
         try:
             require_ffmpeg()
         except RuntimeError as e:
