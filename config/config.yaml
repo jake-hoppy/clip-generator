@@ -1,0 +1,39 @@
+# clip-farm pipeline configuration (Whisper + OpenAI ranking)
+
+# Search queries (yt-dlp will search YouTube for each)
+queries:
+  - "the office best moments"
+  - "the office funniest scenes"
+
+# Optional: direct YouTube URLs to include in the pool
+urls: []
+
+# How many search results to take per query (before applying max_videos_total)
+results_per_query: 10
+
+# Cap total number of source videos across all queries + urls
+max_videos_total: 25
+
+# Download format (prefer mp4 for compatibility)
+download_format: "mp4"
+
+# Filter source videos by duration (seconds)
+min_video_duration_seconds: 60
+max_video_duration_seconds: 1800
+
+# Deterministic ordering for download (optional)
+seed: 42
+
+# Clip length: AI chooses boundaries within this range (seconds). Min/max for "within reason".
+clip_min_duration_seconds: 5.0
+clip_max_duration_seconds: 60.0
+
+# Ranking: take top N segments globally (by OpenAI score)
+top_n_global: 20
+
+# Whisper API model
+whisper_model: "whisper-1"
+
+# OpenAI: model and optional custom prompt for scoring (1-10)
+openai_model: "gpt-4o-mini"
+# openai_prompt: "..."  # optional; default asks for viral/funny clip potential 1-10
