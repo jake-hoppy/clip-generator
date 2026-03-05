@@ -16,17 +16,17 @@ Consider: Is it funny, surprising, or engaging? Would it work as a standalone cl
 
 Reply with ONLY a single number from 1 to 10 (no explanation). Example: 7"""
 
-CLIP_CHOICE_SYSTEM = """You are an expert at finding the funniest or most viral moments in video transcripts. You will receive a transcript with timestamps in the format [start_sec - end_sec] text.
+CLIP_CHOICE_SYSTEM = """You are an expert at finding moments in video transcripts that are interesting, viral-worthy, and have clear resolve (a satisfying payoff or punchline).
 
-Your task: identify standalone clips that would work well as short viral clips (e.g. TikTok, Reels). For each clip YOU choose the start and end time from the transcript—cut where the joke or moment naturally begins and ends. Clip length must be between {min_duration:.0f} and {max_duration:.0f} seconds.
+You will receive a transcript with timestamps in the format [start_sec - end_sec] text. Your task: identify standalone clips that would work as short viral clips (e.g. TikTok, Reels). For each clip YOU choose the start and end time—cut where the moment naturally begins and ends, and include the resolve. Clip length must be between {min_duration:.0f} and {max_duration:.0f} seconds. Prefer clips that are interesting, engaging, and feel complete (they have resolve).
 
 Output exactly one line per clip: START END SCORE
 - START and END are in seconds (use the timestamps from the transcript).
-- SCORE is 1-10 (how good is this as a viral clip).
+- SCORE is 1-100 (rate how interesting and viral-worthy the clip is; prefer clips with clear resolve). Use the full range (e.g. 85, 42, 91).
 - Use only times that appear in the transcript. Output up to 25 clips, best first.
 Example:
-12.5 28.0 9
-45.2 58.1 7
+12.5 28.0 85
+45.2 58.1 72
 Do not add headers or other text—only lines of the form START END SCORE."""
 
 
@@ -51,7 +51,7 @@ def check_openai_api(model: str = "gpt-4o-mini") -> bool:
         client.chat.completions.create(
             model=model,
             messages=[{"role": "user", "content": "Reply with exactly: OK"}],
-            max_tokens=5,
+            max_completion_tokens=5,
         )
         msg = "OpenAI API check: OK (request reached OpenAI and succeeded)"
         logger.info(msg)
@@ -90,8 +90,7 @@ def score_segment(
                 {"role": "system", "content": prompt},
                 {"role": "user", "content": user_content},
             ],
-            max_tokens=10,
-            temperature=0.3,
+            max_completion_tokens=10,
         )
     except Exception as e:
         logger.warning("OpenAI score request failed: %s", e)
@@ -132,7 +131,7 @@ def get_llm_clip_choices(
         user_parts.append(f"Video title: {video_title}\n")
     user_parts.append("Transcript with timestamps (start_sec - end_sec: text):\n")
     user_parts.append(transcript.strip())
-    user_parts.append(f"\n\nVideo total duration: {video_duration_sec:.1f} seconds. Output lines: START END SCORE")
+    user_parts.append(f"\n\nVideo total duration: {video_duration_sec:.1f} seconds. Output lines: START END SCORE (SCORE 1-100).")
     user_content = "".join(user_parts)
 
     client = _get_client()
@@ -143,8 +142,7 @@ def get_llm_clip_choices(
                 {"role": "system", "content": system},
                 {"role": "user", "content": user_content},
             ],
-            max_tokens=1500,
-            temperature=0.3,
+            max_completion_tokens=1500,
         )
     except Exception as e:
         logger.warning("LLM clip choice request failed: %s", e)
@@ -152,6 +150,8 @@ def get_llm_clip_choices(
 
     content = (response.choices[0].message.content or "").strip()
     clips = _parse_clip_lines(content, video_duration_sec, min_duration_sec, max_duration_sec)
+    if not clips and content:
+        logger.warning("LLM returned content but no clips parsed. First 500 chars: %s", content[:500])
     return clips
 
 
@@ -161,34 +161,37 @@ def _parse_clip_lines(
     min_duration_sec: float,
     max_duration_sec: float,
 ) -> list[dict]:
-    """Parse LLM output: lines of START END SCORE (seconds). Clamp to video duration and filter by length."""
+    """Parse LLM output: lines with START END SCORE (seconds). Tolerates headers, labels, and punctuation."""
     clips = []
     for line in content.splitlines():
         line = line.strip()
         if not line or line.startswith("#"):
             continue
-        # Match "12.5 28.0 9" or "12 28 9" or "12.5  28.0  9  optional rest"
-        match = re.match(r"^\s*([\d.]+)\s+([\d.]+)\s+([\d.]+)", line)
-        if not match:
-            continue
-        try:
-            start = float(match.group(1))
-            end = float(match.group(2))
-            score = float(match.group(3))
-        except ValueError:
-            continue
-        start = max(0.0, min(video_duration_sec, start))
-        end = max(0.0, min(video_duration_sec, end))
-        if start >= end:
-            continue
-        duration = end - start
-        if duration < min_duration_sec or duration > max_duration_sec:
-            continue
-        score = max(0.0, min(10.0, score))
-        clips.append({
-            "start_sec": round(start, 2),
-            "end_sec": round(end, 2),
-            "duration_seconds": round(duration, 2),
-            "score": round(score, 2),
-        })
+        # Find all triples of numbers on the line; keep the one that looks like start_sec, end_sec, score
+        # (start < end, score in 0-10). Accepts "12.5 28.0 9", "Clip 1: 12.5 28.0 9", "12.5 - 28.0 - 9"
+        for match in re.finditer(r"([\d.]+)\s*[,\-–—:\s]+\s*([\d.]+)\s*[,\-–—:\s]+\s*([\d.]+)", line):
+            try:
+                a = float(match.group(1))
+                b = float(match.group(2))
+                c = float(match.group(3))
+            except ValueError:
+                continue
+            # Prefer triple where a < b (start < end) and c is 0-100 (score)
+            if a >= b or c < 0 or c > 100:
+                continue
+            start = max(0.0, min(video_duration_sec, a))
+            end = max(0.0, min(video_duration_sec, b))
+            if start >= end:
+                continue
+            duration = end - start
+            if duration < min_duration_sec or duration > max_duration_sec:
+                continue
+            score = max(0.0, min(100.0, c))
+            clips.append({
+                "start_sec": round(start, 2),
+                "end_sec": round(end, 2),
+                "duration_seconds": round(duration, 2),
+                "score": round(score, 2),
+            })
+            break  # One clip per line
     return clips

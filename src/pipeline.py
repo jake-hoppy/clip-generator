@@ -99,6 +99,7 @@ def run_whisper_rank(
     top_n = int(config.get("top_n_global", 20))
     clip_min = float(config.get("clip_min_duration_seconds", 5.0))
     clip_max = float(config.get("clip_max_duration_seconds", 60.0))
+    clip_tail = float(config.get("clip_tail_seconds", 2.0))
     whisper_model = config.get("whisper_model", "whisper-1")
 
     manifests_videos_dir().mkdir(parents=True, exist_ok=True)
@@ -154,6 +155,12 @@ def run_whisper_rank(
 
         this_video_manifest_clips: list[dict] = []
         for seg in clips:
+            # Add tail so the clip doesn't end abruptly (extend end by clip_tail_seconds, cap at video end)
+            end_with_tail = min(seg["end_sec"] + clip_tail, video_duration)
+            duration_with_tail = end_with_tail - seg["start_sec"]
+            seg["end_sec"] = round(end_with_tail, 2)
+            seg["duration_seconds"] = round(duration_with_tail, 2)
+
             start_ms = int(seg["start_sec"] * 1000)
             end_ms = int(seg["end_sec"] * 1000)
             clip_id = f"{video_id}_t{start_ms}_{end_ms}"
