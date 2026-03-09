@@ -61,6 +61,10 @@ python -m src.main run
 # Rank only: Whisper + OpenAI on already-downloaded videos; top N to data/candidates_ranked/
 python -m src.main rank
 
+# Burn subtitles onto selected top-ranked clips; output to data/outputs/
+python -m src.main burn-subtitles --ranks 1,3,5-8    # ranks 1, 3, 5, 6, 7, 8
+python -m src.main burn-subtitles --all              # all top 20
+
 # Refresh: delete candidate/ranked clips and manifests (keeps source videos); run or rank to regenerate
 python -m src.main refresh
 ```
@@ -90,7 +94,7 @@ data/
   videos/              # Downloaded source videos (<video_id>.mp4)
   candidates/          # All extracted segments per video (<video_id>/<clip_id>.mp4)
   candidates_ranked/   # Top N ranked clip MP4s (rank_001_..., rank_002_...)
-  outputs/             # Reserved for final results later (empty for now)
+  outputs/             # Burned-subtitle clips from burn-subtitles (rank_001_..., etc.)
   logs/                # run.log
   manifests/
     videos/            # JSON metadata per downloaded video
@@ -136,3 +140,4 @@ Set **OPENAI_API_KEY** in your environment or in a `.env` file in the project ro
 - **chunk_mode:** `llm` (default)—LLM picks clip boundaries and scores. `whisper`—Whisper merge defines chunks, LLM only scores.
 - **Idempotency:** Re-running download skips videos that already have a file + manifest. Re-running rank overwrites candidates and ranked output.
 - **No database:** All metadata is stored as JSON in `data/manifests/`.
+- **Top 20 transcript data:** Each clip in `data/manifests/candidates_ranked/top_ranked_manifest.json` includes a `transcript` array: `[{start_sec, end_sec, text}, ...]` with timestamps **relative to the clip** (0-based). Use this for a separate flow to select clips and burn subtitles (e.g. via `src.media.subtitles.transcript_to_srt` + FFmpeg `subtitles` filter). Full Whisper segments per video are stored in `data/manifests/transcripts/<video_id>.json`.

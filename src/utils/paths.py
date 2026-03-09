@@ -65,6 +65,11 @@ def manifests_candidates_ranked_dir() -> Path:
     return manifests_dir() / "candidates_ranked"
 
 
+def manifests_transcripts_dir() -> Path:
+    """Whisper transcript segments per video: data/manifests/transcripts/ (used for subtitles on top 20)."""
+    return manifests_dir() / "transcripts"
+
+
 def video_file_path(video_id: str, ext: str = "mp4") -> Path:
     """Path for a downloaded video: data/videos/<video_id>.mp4"""
     return videos_dir() / f"{video_id}.{ext}"
@@ -114,6 +119,7 @@ def ensure_data_dirs() -> None:
         manifests_videos_dir(),
         manifests_candidates_dir(),
         manifests_candidates_ranked_dir(),
+        manifests_transcripts_dir(),
     ]
     for d in dirs:
         d.mkdir(parents=True, exist_ok=True)

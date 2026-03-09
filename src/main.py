@@ -15,11 +15,12 @@ from src.pipeline import (
     run_download,
     run_full,
     run_whisper_rank,
+    run_burn_subtitles,
     run_refresh,
     print_summary,
     print_run_summary,
 )
-from src.utils.paths import candidates_ranked_dir
+from src.utils.paths import candidates_ranked_dir, outputs_dir
 from src.media.ffmpeg import require_ffmpeg
 
 
@@ -61,6 +62,51 @@ def cmd_rank(args: argparse.Namespace, config: dict) -> None:
         print("  (dry run — no files written)")
     print(f"  Clips ranked:     {len(clips)}")
     print(f"  Output:           {candidates_ranked_dir()}")
+    print("=" * 60)
+
+
+def _parse_ranks(s: str) -> list[int]:
+    """Parse '1,3,5-8,10' into [1, 3, 5, 6, 7, 8, 10]. Ranks are 1-based."""
+    out = []
+    for part in s.split(","):
+        part = part.strip()
+        if not part:
+            continue
+        if "-" in part:
+            a, b = part.split("-", 1)
+            try:
+                lo, hi = int(a.strip()), int(b.strip())
+                out.extend(range(lo, hi + 1))
+            except ValueError:
+                pass
+        else:
+            try:
+                out.append(int(part))
+            except ValueError:
+                pass
+    return sorted(set(out))
+
+
+def cmd_burn_subtitles(args: argparse.Namespace, config: dict) -> None:
+    """Burn subtitles onto selected top-ranked clips; output to data/outputs/."""
+    ranks = getattr(args, "ranks", None)
+    if getattr(args, "all", False):
+        ranks = None
+    elif ranks is None or (isinstance(ranks, str) and not ranks.strip()):
+        print("Error: specify --ranks 1,3,5 or --ranks 1-10, or --all", file=sys.stderr)
+        raise SystemExit(1)
+    elif isinstance(ranks, str):
+        ranks = _parse_ranks(ranks)
+    results = run_burn_subtitles(ranks=ranks, dry_run=args.dry_run)
+    print("\n" + "=" * 60)
+    print("BURN SUBTITLES")
+    print("=" * 60)
+    if args.dry_run:
+        print("  (dry run — no files written)")
+    print(f"  Clips processed: {len(results)}")
+    print(f"  Output folder:   {outputs_dir()}")
+    for r in results:
+        print(f"    -> {Path(r['output']).name}")
     print("=" * 60)
 
 
@@ -118,6 +164,21 @@ def main() -> int:
     p_rank.add_argument("--dry-run", action="store_true", help="Do not extract clips")
     p_rank.set_defaults(func=cmd_rank)
 
+    # burn-subtitles
+    p_burn = subparsers.add_parser(
+        "burn-subtitles",
+        help="Burn Whisper subtitles onto selected top-ranked clips; output to data/outputs/.",
+    )
+    p_burn.add_argument(
+        "--ranks",
+        type=str,
+        default=None,
+        help="Comma-separated ranks and/or ranges, e.g. 1,3,5-8,10 (1-based). Use --all for all.",
+    )
+    p_burn.add_argument("--all", action="store_true", help="Process all clips in top_ranked_manifest (all top 20)")
+    p_burn.add_argument("--dry-run", action="store_true", help="Only log what would be burned")
+    p_burn.set_defaults(func=cmd_burn_subtitles)
+
     # refresh
     p_refresh = subparsers.add_parser(
         "refresh",
@@ -136,7 +197,7 @@ def main() -> int:
         print(f"Error: {e}", file=sys.stderr)
         return 1
 
-    if args.command in ("run", "rank"):
+    if args.command in ("run", "rank", "burn-subtitles"):
         try:
             require_ffmpeg()
         except RuntimeError as e:

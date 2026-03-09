@@ -153,3 +153,33 @@ def extract_clip(
         args.extend(["-c:v", "libx264", "-c:a", "aac"])
     args.append(str(output_path))
     run_ffmpeg(args)
+
+
+def _escape_subtitles_path(p: Path) -> str:
+    """Escape path for use in FFmpeg subtitles filter (slashes, colons, backslashes, spaces)."""
+    s = str(p.resolve())
+    s = s.replace("\\", "\\\\").replace(":", "\\:").replace("/", "\\/").replace(" ", "\\ ")
+    return s
+
+
+def burn_subtitles(
+    input_path: Path,
+    srt_path: Path,
+    output_path: Path,
+) -> None:
+    """
+    Burn SRT subtitles into the video. Uses -c:a copy to avoid re-encoding audio.
+    input_path: source video (e.g. from data/candidates_ranked/).
+    srt_path: path to .srt file (timestamps should be relative to the video).
+    output_path: output video (e.g. data/outputs/).
+    """
+    filter_path = _escape_subtitles_path(Path(srt_path))
+    args = [
+        "-i", str(input_path),
+        "-vf", f"subtitles={filter_path}",
+        "-c:a", "copy",
+        str(output_path),
+    ]
+    run_ffmpeg(args)
+
+

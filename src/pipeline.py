@@ -4,7 +4,9 @@ Loads config from YAML; supports dry-run and limit overrides.
 """
 import json
 import logging
+import os
 import shutil
+import tempfile
 from pathlib import Path
 from typing import Any
 
@@ -17,16 +19,24 @@ from src.utils.paths import (
     candidates_dir,
     candidates_dir_for_video,
     candidates_ranked_dir,
+    outputs_dir,
     manifests_dir,
     manifests_videos_dir,
     manifests_candidates_dir,
     manifests_candidates_ranked_dir,
+    manifests_transcripts_dir,
 )
-from src.media.ffmpeg import require_ffmpeg, extract_clip, get_duration_seconds
+from src.media.ffmpeg import require_ffmpeg, extract_clip, get_duration_seconds, burn_subtitles, FFmpegError
 from src.youtube.search_download import build_video_pool, VideoMeta
-from src.ai.whisper_segments import get_whisper_segments, get_whisper_segments_raw, format_transcript_for_llm
+from src.ai.whisper_segments import (
+    get_whisper_segments_raw,
+    format_transcript_for_llm,
+    merge_segments_dicts,
+    get_transcript_for_range,
+)
 from src.ai.openai_score import get_llm_clip_choices, check_openai_api, score_segment
 from src.utils.paths import video_file_path
+from src.media.subtitles import write_srt_for_clip
 
 logger = logging.getLogger(__name__)
 
@@ -105,6 +115,7 @@ def run_whisper_rank(
 
     manifests_videos_dir().mkdir(parents=True, exist_ok=True)
     manifests_candidates_dir().mkdir(parents=True, exist_ok=True)
+    manifests_transcripts_dir().mkdir(parents=True, exist_ok=True)
     all_segments: list[dict] = []
 
     for mpath in manifests_videos_dir().glob("*.json"):
@@ -125,25 +136,36 @@ def run_whisper_rank(
         except Exception:
             video_duration = 0.0
 
+        # Single Whisper call per video; save transcript for top-20 subtitle flow.
+        try:
+            raw_segments = get_whisper_segments_raw(
+                video_path,
+                video_id,
+                model=whisper_model,
+            )
+        except Exception as e:
+            logger.warning("Whisper failed for %s: %s", video_id, e)
+            continue
+        if not raw_segments:
+            logger.warning("No Whisper segments for %s", video_id)
+            continue
+        if video_duration <= 0:
+            video_duration = raw_segments[-1]["end_sec"]
+
+        # Persist transcript (timestamps + text) for subtitle burn and other flows.
+        if not dry_run:
+            transcript_path = manifests_transcripts_dir() / f"{video_id}.json"
+            try:
+                with open(transcript_path, "w", encoding="utf-8") as f:
+                    json.dump({"video_id": video_id, "segments": raw_segments}, f, indent=2)
+            except Exception as e:
+                logger.warning("Could not save transcript for %s: %s", video_id, e)
+
         if chunk_mode == "whisper":
             # Whisper merge defines chunk boundaries; LLM only scores each chunk.
-            try:
-                chunks = get_whisper_segments(
-                    video_path,
-                    video_id,
-                    min_duration_sec=clip_min,
-                    max_duration_sec=clip_max,
-                    model=whisper_model,
-                )
-            except Exception as e:
-                logger.warning("Whisper failed for %s: %s", video_id, e)
-                continue
+            chunks = merge_segments_dicts(raw_segments, clip_min, clip_max)
             if not chunks:
-                logger.warning("No Whisper chunks for %s", video_id)
                 continue
-            if video_duration <= 0 and chunks:
-                video_duration = chunks[-1]["end_sec"]
-
             clips = []
             for ch in chunks:
                 score = score_segment(
@@ -159,22 +181,7 @@ def run_whisper_rank(
                     "text": ch.get("text", ""),
                 })
         else:
-            # LLM chooses clip boundaries and scores (original behavior).
-            try:
-                raw_segments = get_whisper_segments_raw(
-                    video_path,
-                    video_id,
-                    model=whisper_model,
-                )
-            except Exception as e:
-                logger.warning("Whisper failed for %s: %s", video_id, e)
-                continue
-            if not raw_segments:
-                logger.warning("No Whisper segments for %s", video_id)
-                continue
-            if video_duration <= 0:
-                video_duration = raw_segments[-1]["end_sec"]
-
+            # LLM chooses clip boundaries and scores.
             transcript = format_transcript_for_llm(raw_segments)
             if not transcript.strip():
                 continue
@@ -262,6 +269,25 @@ def run_whisper_rank(
             continue
         entry = {k: v for k, v in seg.items() if k not in ("_video_path", "_video_title")}
         entry["filepath"] = str(out_path)
+
+        # Attach Whisper transcript (timestamps + text) for this clip, relative to clip start (for subtitle burn).
+        transcript_path = manifests_transcripts_dir() / f"{seg['video_id']}.json"
+        if transcript_path.exists():
+            try:
+                with open(transcript_path, encoding="utf-8") as f:
+                    data = json.load(f)
+                segments = data.get("segments") or []
+                entry["transcript"] = get_transcript_for_range(
+                    segments,
+                    seg["start_sec"],
+                    seg["end_sec"],
+                )
+            except Exception as e:
+                logger.warning("Could not load transcript for %s: %s", seg["clip_id"], e)
+                entry["transcript"] = []
+        else:
+            entry["transcript"] = []
+
         manifest_list.append(entry)
 
     manifest_path = manifests_candidates_ranked_dir() / "top_ranked_manifest.json"
@@ -270,6 +296,88 @@ def run_whisper_rank(
         json.dump({"top_n": top_n, "clips": manifest_list}, f, indent=2)
     logger.info("Wrote candidates to %s, top %d ranked to %s", candidates_dir(), len(manifest_list), rank_dir)
     return manifest_list
+
+
+def run_burn_subtitles(
+    ranks: list[int] | None = None,
+    dry_run: bool = False,
+) -> list[dict]:
+    """
+    Load top-ranked manifest, select clips by rank (1-based), burn subtitles onto them,
+    and write outputs to data/outputs/. ranks=None means all top 20.
+    Returns list of output clip info for the burned clips.
+    """
+    ensure_data_dirs()
+    manifest_path = manifests_candidates_ranked_dir() / "top_ranked_manifest.json"
+    if not manifest_path.exists():
+        logger.warning("No top_ranked_manifest.json found. Run 'run' or 'rank' first.")
+        return []
+
+    with open(manifest_path, encoding="utf-8") as f:
+        data = json.load(f)
+    clips = data.get("clips") or []
+    if not clips:
+        logger.warning("No clips in top_ranked_manifest.json")
+        return []
+
+    # Select by rank (1-based: 1 = first clip)
+    if ranks is not None:
+        rank_set = set(ranks)
+        selected = [c for i, c in enumerate(clips, start=1) if i in rank_set]
+    else:
+        selected = clips
+
+    if not selected:
+        logger.warning("No clips selected (check --ranks)")
+        return []
+
+    out_dir = outputs_dir()
+    out_dir.mkdir(parents=True, exist_ok=True)
+    results = []
+    for clip in selected:
+        src_path = Path(clip.get("filepath") or "")
+        transcript = clip.get("transcript") or []
+        if not src_path.exists():
+            logger.warning("Source file missing: %s", src_path)
+            continue
+        if not transcript:
+            logger.warning("No transcript for %s, skipping", clip.get("clip_id", "?"))
+            continue
+
+        basename = src_path.name
+        out_name = basename
+        srt_path = out_dir / (Path(basename).stem + ".srt")
+        out_path = out_dir / out_name
+
+        if dry_run:
+            logger.info("Would burn subtitles: %s -> %s", basename, out_path)
+            results.append({"source": str(src_path), "output": str(out_path), "rank": clip.get("clip_id")})
+            continue
+
+        # Use temp paths (no spaces) so FFmpeg's filter and output both work on paths like .../Mobile Documents/...
+        tmp_srt = None
+        tmp_mp4 = None
+        try:
+            fd, tmp_srt = tempfile.mkstemp(suffix=".srt", prefix="clip_")
+            os.close(fd)
+            tmp_srt_path = Path(tmp_srt)
+            write_srt_for_clip(transcript, tmp_srt_path)
+            fd2, tmp_mp4 = tempfile.mkstemp(suffix=".mp4", prefix="burn_")
+            os.close(fd2)
+            tmp_mp4_path = Path(tmp_mp4)
+            burn_subtitles(src_path, tmp_srt_path, tmp_mp4_path)
+            shutil.move(str(tmp_mp4_path), str(out_path))
+            results.append({"source": str(src_path), "output": str(out_path), "clip_id": clip.get("clip_id")})
+        except FFmpegError as e:
+            logger.warning("Burn subtitles failed for %s: %s\nFFmpeg stderr: %s", basename, e, (e.stderr or "").strip())
+        except Exception as e:
+            logger.warning("Burn subtitles failed for %s: %s", basename, e)
+        finally:
+            if tmp_srt and Path(tmp_srt).exists():
+                Path(tmp_srt).unlink(missing_ok=True)
+            if tmp_mp4 and Path(tmp_mp4).exists():
+                Path(tmp_mp4).unlink(missing_ok=True)
+    return results
 
 
 def run_refresh(dry_run: bool = False) -> tuple[int, int]:

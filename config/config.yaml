@@ -3,7 +3,7 @@
 # Search queries (yt-dlp will search YouTube for each)
 queries:
   - "Family guy best moments"
-  - "Parks and Rec funniest moments"
+  - "Most hilarious Family guy clips"
 
 # Optional: direct YouTube URLs to include in the pool
 urls: []
@@ -32,7 +32,7 @@ clip_min_duration_seconds: 20.0
 clip_max_duration_seconds: 45.0
 
 # Extra seconds added after each clip's end so it doesn't cut off abruptly (tail).
-clip_tail_seconds: 1.0
+clip_tail_seconds: 0.5
 
 # Ranking: take top N segments globally (by OpenAI score)
 top_n_global: 20

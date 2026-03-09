@@ -212,3 +212,90 @@ def _merge_segments(
     if chunk_end > chunk_start:
         out.append((chunk_start, chunk_end, " ".join(chunk_text)))
     return out
+
+
+def merge_segments_dicts(
+    segments: list[dict],
+    min_duration_sec: float,
+    max_duration_sec: float,
+) -> list[dict]:
+    """
+    Merge consecutive segments (list of dicts with start_sec, end_sec, text) into chunks
+    between min and max duration. Returns list of {start_sec, end_sec, text, duration_seconds}.
+    """
+    if not segments:
+        return []
+    out: list[dict] = []
+    chunk_start = segments[0].get("start_sec", 0.0)
+    chunk_end = segments[0].get("end_sec", 0.0)
+    chunk_text = [(segments[0].get("text") or "").strip()]
+
+    for s in segments[1:]:
+        start = s.get("start_sec", 0.0)
+        end = s.get("end_sec", 0.0)
+        text = (s.get("text") or "").strip()
+        candidate_end = end
+        candidate_duration = candidate_end - chunk_start
+
+        if candidate_duration >= max_duration_sec:
+            out.append({
+                "start_sec": chunk_start,
+                "end_sec": chunk_end,
+                "text": " ".join(chunk_text),
+                "duration_seconds": round(chunk_end - chunk_start, 2),
+            })
+            chunk_start = start
+            chunk_end = end
+            chunk_text = [text]
+        elif candidate_duration >= min_duration_sec and (end - chunk_end) > 0.5:
+            out.append({
+                "start_sec": chunk_start,
+                "end_sec": chunk_end,
+                "text": " ".join(chunk_text),
+                "duration_seconds": round(chunk_end - chunk_start, 2),
+            })
+            chunk_start = start
+            chunk_end = end
+            chunk_text = [text]
+        else:
+            chunk_end = end
+            chunk_text.append(text)
+
+    if chunk_end > chunk_start:
+        out.append({
+            "start_sec": chunk_start,
+            "end_sec": chunk_end,
+            "text": " ".join(chunk_text),
+            "duration_seconds": round(chunk_end - chunk_start, 2),
+        })
+    return out
+
+
+def get_transcript_for_range(
+    segments: list[dict],
+    clip_start_sec: float,
+    clip_end_sec: float,
+) -> list[dict]:
+    """
+    Return Whisper segments that overlap [clip_start_sec, clip_end_sec], with timestamps
+    relative to clip start (0-based). For use when burning subtitles into the clip.
+    Each item: {start_sec, end_sec, text} (relative to clip).
+    """
+    clip_duration = clip_end_sec - clip_start_sec
+    out = []
+    for s in segments:
+        seg_start = s.get("start_sec", 0.0)
+        seg_end = s.get("end_sec", 0.0)
+        text = (s.get("text") or "").strip()
+        if not text or seg_end <= clip_start_sec or seg_start >= clip_end_sec:
+            continue
+        rel_start = max(0.0, seg_start - clip_start_sec)
+        rel_end = min(clip_duration, seg_end - clip_start_sec)
+        if rel_start >= rel_end:
+            continue
+        out.append({
+            "start_sec": round(rel_start, 2),
+            "end_sec": round(rel_end, 2),
+            "text": text,
+        })
+    return out
