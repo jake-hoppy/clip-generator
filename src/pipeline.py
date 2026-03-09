@@ -24,8 +24,8 @@ from src.utils.paths import (
 )
 from src.media.ffmpeg import require_ffmpeg, extract_clip, get_duration_seconds
 from src.youtube.search_download import build_video_pool, VideoMeta
-from src.ai.whisper_segments import get_whisper_segments_raw, format_transcript_for_llm
-from src.ai.openai_score import get_llm_clip_choices, check_openai_api
+from src.ai.whisper_segments import get_whisper_segments, get_whisper_segments_raw, format_transcript_for_llm
+from src.ai.openai_score import get_llm_clip_choices, check_openai_api, score_segment
 from src.utils.paths import video_file_path
 
 logger = logging.getLogger(__name__)
@@ -94,13 +94,14 @@ def run_whisper_rank(
     """
     require_ffmpeg()
     ensure_data_dirs()
-    openai_model = config.get("openai_model", "gpt-4o-mini")
+    openai_model = config.get("openai_model", "gpt-5.4")
     check_openai_api(model=openai_model)
     top_n = int(config.get("top_n_global", 20))
     clip_min = float(config.get("clip_min_duration_seconds", 5.0))
     clip_max = float(config.get("clip_max_duration_seconds", 60.0))
     clip_tail = float(config.get("clip_tail_seconds", 2.0))
     whisper_model = config.get("whisper_model", "whisper-1")
+    chunk_mode = (config.get("chunk_mode") or "whisper").strip().lower()
 
     manifests_videos_dir().mkdir(parents=True, exist_ok=True)
     manifests_candidates_dir().mkdir(parents=True, exist_ok=True)
@@ -120,38 +121,75 @@ def run_whisper_rank(
             video_title = ""
 
         try:
-            raw_segments = get_whisper_segments_raw(
-                video_path,
-                video_id,
-                model=whisper_model,
-            )
-        except Exception as e:
-            logger.warning("Whisper failed for %s: %s", video_id, e)
-            continue
-        if not raw_segments:
-            logger.warning("No Whisper segments for %s", video_id)
-            continue
-
-        try:
             video_duration = get_duration_seconds(video_path)
         except Exception:
-            video_duration = raw_segments[-1]["end_sec"] if raw_segments else 0.0
+            video_duration = 0.0
 
-        transcript = format_transcript_for_llm(raw_segments)
-        if not transcript.strip():
-            continue
-        try:
-            clips = get_llm_clip_choices(
-                transcript,
-                video_title=video_title or None,
-                video_duration_sec=video_duration,
-                min_duration_sec=clip_min,
-                max_duration_sec=clip_max,
-                model=openai_model,
-            )
-        except Exception as e:
-            logger.warning("LLM clip choices failed for %s: %s", video_id, e)
-            continue
+        if chunk_mode == "whisper":
+            # Whisper merge defines chunk boundaries; LLM only scores each chunk.
+            try:
+                chunks = get_whisper_segments(
+                    video_path,
+                    video_id,
+                    min_duration_sec=clip_min,
+                    max_duration_sec=clip_max,
+                    model=whisper_model,
+                )
+            except Exception as e:
+                logger.warning("Whisper failed for %s: %s", video_id, e)
+                continue
+            if not chunks:
+                logger.warning("No Whisper chunks for %s", video_id)
+                continue
+            if video_duration <= 0 and chunks:
+                video_duration = chunks[-1]["end_sec"]
+
+            clips = []
+            for ch in chunks:
+                score = score_segment(
+                    ch.get("text") or "",
+                    video_title=video_title or None,
+                    model=openai_model,
+                )
+                clips.append({
+                    "start_sec": ch["start_sec"],
+                    "end_sec": ch["end_sec"],
+                    "duration_seconds": ch.get("duration_seconds", ch["end_sec"] - ch["start_sec"]),
+                    "score": score,
+                    "text": ch.get("text", ""),
+                })
+        else:
+            # LLM chooses clip boundaries and scores (original behavior).
+            try:
+                raw_segments = get_whisper_segments_raw(
+                    video_path,
+                    video_id,
+                    model=whisper_model,
+                )
+            except Exception as e:
+                logger.warning("Whisper failed for %s: %s", video_id, e)
+                continue
+            if not raw_segments:
+                logger.warning("No Whisper segments for %s", video_id)
+                continue
+            if video_duration <= 0:
+                video_duration = raw_segments[-1]["end_sec"]
+
+            transcript = format_transcript_for_llm(raw_segments)
+            if not transcript.strip():
+                continue
+            try:
+                clips = get_llm_clip_choices(
+                    transcript,
+                    video_title=video_title or None,
+                    video_duration_sec=video_duration,
+                    min_duration_sec=clip_min,
+                    max_duration_sec=clip_max,
+                    model=openai_model,
+                )
+            except Exception as e:
+                logger.warning("LLM clip choices failed for %s: %s", video_id, e)
+                continue
 
         this_video_manifest_clips: list[dict] = []
         for seg in clips:

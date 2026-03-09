@@ -1,6 +1,6 @@
 # clip-farm
 
-Build a pool of short vertical-ready clips from multiple YouTube videos: search + download, then **Whisper** transcribes and the **LLM (gpt-4o-mini)** chooses where each funny clip starts and ends (within a min/max duration) and scores it. Top N clips go to `data/candidates_ranked/`.
+Build a pool of short vertical-ready clips from multiple YouTube videos: search + download, then **Whisper** transcribes and the **LLM** (e.g. gpt-5.4, configurable) chooses where each funny clip starts and ends (within a min/max duration) and scores it. Top N clips go to `data/candidates_ranked/`.
 
 ## Prerequisites
 
@@ -44,7 +44,7 @@ Edit `config/config.yaml` to set:
 - **clip_min_duration_seconds** / **clip_max_duration_seconds** – min and max length for each clip (AI chooses exact boundaries within this range, e.g. 5–60 s)
 - **top_n_global** – number of top-ranked clips to keep globally (e.g. 20)
 - **whisper_model** – Whisper API model (default: `whisper-1`)
-- **openai_model** – model for scoring (default: `gpt-4o-mini`)
+- **openai_model** – model for clip selection/ranking (default: `gpt-5.4`). See [OpenAI models](https://platform.openai.com/docs/models).
 - **openai_prompt** – optional; override the default scoring prompt (only used for the legacy per-segment scorer; clip boundaries use a built-in prompt)
 
 ## How to run
@@ -132,6 +132,7 @@ Set **OPENAI_API_KEY** in your environment or in a `.env` file in the project ro
 ## Design notes
 
 - **Clip boundaries:** Whisper returns a full timestamped transcript; the LLM is given the transcript and chooses start/end times for each funny clip (within clip_min/max_duration_seconds). No fixed window—the AI decides where to cut.
-- **Scoring:** The same LLM call returns a 1–10 score per suggested clip; clips are ranked globally and top N are extracted.
+- **Scoring:** The LLM returns a 1–100 score per clip; clips are ranked globally and top N are extracted.
+- **chunk_mode:** `llm` (default)—LLM picks clip boundaries and scores. `whisper`—Whisper merge defines chunks, LLM only scores.
 - **Idempotency:** Re-running download skips videos that already have a file + manifest. Re-running rank overwrites candidates and ranked output.
 - **No database:** All metadata is stored as JSON in `data/manifests/`.

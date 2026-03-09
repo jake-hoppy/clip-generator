@@ -1,6 +1,7 @@
 """
-Score a transcript segment using OpenAI Chat Completions (e.g. gpt-4o-mini).
+Score a transcript segment using OpenAI Chat Completions (e.g. gpt-5.4).
 Also: let the LLM choose clip boundaries from a full transcript (start/end + score).
+Uses Chat Completions API with max_completion_tokens; model is configurable (config.openai_model).
 """
 import logging
 import re
@@ -10,11 +11,11 @@ from openai import OpenAI
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_PROMPT = """You are judging how good a short video clip would be for social media (e.g. TikTok, Reels). Rate the following transcript segment from 1 to 10.
+DEFAULT_PROMPT = """You are judging how good a short video clip would be for social media (e.g. TikTok, Reels). Rate the following transcript segment from 1 to 100.
 
 Consider: Is it funny, surprising, or engaging? Would it work as a standalone clip? Is the payoff clear in this segment?
 
-Reply with ONLY a single number from 1 to 10 (no explanation). Example: 7"""
+Reply with ONLY a single number from 1 to 100 (no explanation). Example: 72"""
 
 CLIP_CHOICE_SYSTEM = """You are an expert at finding moments in video transcripts that are interesting, viral-worthy, and have clear resolve (a satisfying payoff or punchline).
 
@@ -40,7 +41,7 @@ def _get_client() -> OpenAI:
     return OpenAI(api_key=key)
 
 
-def check_openai_api(model: str = "gpt-4o-mini") -> bool:
+def check_openai_api(model: str = "gpt-5.4") -> bool:
     """
     Make a minimal request to OpenAI to verify the API key and connectivity.
     Returns True if the request succeeds. Logs result to console and logger.
@@ -67,11 +68,11 @@ def check_openai_api(model: str = "gpt-4o-mini") -> bool:
 def score_segment(
     text: str,
     video_title: str | None = None,
-    model: str = "gpt-4o-mini",
+    model: str = "gpt-5.4",
     prompt_override: str | None = None,
 ) -> float:
     """
-    Send segment text to OpenAI and get a numeric score (1-10).
+    Send segment text to OpenAI and get a numeric score (1-100).
     Uses the default prompt about viral/clip potential unless prompt_override is set.
     """
     if not (text or "").strip():
@@ -103,7 +104,7 @@ def score_segment(
         logger.warning("Could not parse score from: %r", content)
         return 0.0
     score = float(match.group(1))
-    return max(0.0, min(10.0, score))
+    return max(0.0, min(100.0, score))
 
 
 def get_llm_clip_choices(
@@ -112,7 +113,7 @@ def get_llm_clip_choices(
     video_duration_sec: float,
     min_duration_sec: float = 5.0,
     max_duration_sec: float = 60.0,
-    model: str = "gpt-4o-mini",
+    model: str = "gpt-5.4",
 ) -> list[dict]:
     """
     Send full transcript (with timestamps) to the LLM; it returns clip boundaries and scores.
