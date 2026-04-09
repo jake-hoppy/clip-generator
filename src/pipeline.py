@@ -2,9 +2,12 @@
 Orchestrates pipeline steps: download -> Whisper segments + OpenAI ranking.
 Loads config from YAML; supports dry-run and limit overrides.
 """
+import heapq
 import json
 import logging
 import shutil
+import threading
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Any
 
@@ -33,6 +36,8 @@ from src.media.vertical_crop import crop_to_vertical
 from src.utils.paths import video_file_path, outputs_dir
 
 logger = logging.getLogger(__name__)
+
+_SCORING_WORKERS = 8
 
 
 def load_config(config_path: Path) -> dict[str, Any]:
@@ -196,7 +201,9 @@ def run_whisper_rank(
             continue
 
         this_video_manifest_clips: list[dict] = []
-        for seg in raw_segments:
+        _seg_lock = threading.Lock()
+
+        def _score_segment(seg: dict) -> None:
             start_ms = int(seg["start_sec"] * 1000)
             end_ms = int(seg["end_sec"] * 1000)
             clip_id = f"{video_id}_t{start_ms}_{end_ms}"
@@ -207,54 +214,51 @@ def run_whisper_rank(
             cand_path = candidates_dir_for_video(video_id) / f"{clip_id}.mp4"
             seg["filepath"] = str(cand_path)
 
-            if not dry_run:
-                # --- Text score ---
-                text_score = 0.0
-                if do_text:
-                    try:
-                        text_score = score_segment(
-                            seg["text"],
-                            video_title=video_title or None,
-                            model=openai_model,
-                            prompt_override=openai_prompt,
-                        )
-                    except Exception as e:
-                        logger.warning("Text scoring failed for %s: %s", clip_id, e)
-
-                # --- Audio score ---
-                audio_score_val = 0.0
-                if do_audio:
-                    try:
-                        audio_score_val = score_audio(video_path, seg["start_sec"], seg["end_sec"])
-                    except Exception as e:
-                        logger.warning("Audio scoring failed for %s: %s", clip_id, e)
-
-                # --- Visual score ---
-                visual_score_val = 0.0
-                if do_visual:
-                    try:
-                        visual_score_val = score_visual(video_path, seg["start_sec"], seg["end_sec"])
-                    except Exception as e:
-                        logger.warning("Visual scoring failed for %s: %s", clip_id, e)
-
-                fused = (
-                    text_score * weights["text"]
-                    + audio_score_val * weights["audio"]
-                    + visual_score_val * weights["visual"]
-                )
-                seg["text_score"] = round(text_score, 2)
-                seg["audio_score"] = round(audio_score_val, 2)
-                seg["visual_score"] = round(visual_score_val, 2)
-                seg["score"] = round(fused, 2)
-            else:
+            if dry_run:
                 seg["text_score"] = 0.0
                 seg["audio_score"] = 0.0
                 seg["visual_score"] = 0.0
                 seg["score"] = 0.0
+                with _seg_lock:
+                    all_segments.append(seg)
+                return
 
-            if dry_run:
-                all_segments.append(seg)
-                continue
+            text_score = 0.0
+            if do_text:
+                try:
+                    text_score = score_segment(
+                        seg["text"],
+                        video_title=video_title or None,
+                        model=openai_model,
+                        prompt_override=openai_prompt,
+                    )
+                except Exception as e:
+                    logger.warning("Text scoring failed for %s: %s", clip_id, e)
+
+            audio_score_val = 0.0
+            if do_audio:
+                try:
+                    audio_score_val = score_audio(video_path, seg["start_sec"], seg["end_sec"])
+                except Exception as e:
+                    logger.warning("Audio scoring failed for %s: %s", clip_id, e)
+
+            visual_score_val = 0.0
+            if do_visual:
+                try:
+                    visual_score_val = score_visual(video_path, seg["start_sec"], seg["end_sec"])
+                except Exception as e:
+                    logger.warning("Visual scoring failed for %s: %s", clip_id, e)
+
+            fused = (
+                text_score * weights["text"]
+                + audio_score_val * weights["audio"]
+                + visual_score_val * weights["visual"]
+            )
+            seg["text_score"] = round(text_score, 2)
+            seg["audio_score"] = round(audio_score_val, 2)
+            seg["visual_score"] = round(visual_score_val, 2)
+            seg["score"] = round(fused, 2)
+
             cand_path.parent.mkdir(parents=True, exist_ok=True)
             try:
                 extract_clip(
@@ -266,9 +270,20 @@ def run_whisper_rank(
                 )
             except Exception as e:
                 logger.warning("Extract failed %s: %s", clip_id, e)
-                continue
-            this_video_manifest_clips.append({k: v for k, v in seg.items() if k not in ("_video_path", "_video_title")})
-            all_segments.append(seg)
+                return
+
+            manifest_entry = {k: v for k, v in seg.items() if k not in ("_video_path", "_video_title")}
+            with _seg_lock:
+                this_video_manifest_clips.append(manifest_entry)
+                all_segments.append(seg)
+
+        with ThreadPoolExecutor(max_workers=_SCORING_WORKERS) as pool:
+            futures = [pool.submit(_score_segment, seg) for seg in raw_segments]
+            for fut in as_completed(futures):
+                try:
+                    fut.result()
+                except Exception as e:
+                    logger.warning("Segment scoring worker failed: %s", e)
 
         if not dry_run and this_video_manifest_clips:
             manifest_data = {
@@ -279,8 +294,7 @@ def run_whisper_rank(
             with open(manifest_path, "w", encoding="utf-8") as f:
                 json.dump(manifest_data, f, indent=2)
 
-    all_segments.sort(key=lambda s: s["score"], reverse=True)
-    top = all_segments[:top_n]
+    top = heapq.nlargest(top_n, all_segments, key=lambda s: s["score"])
     if not top:
         logger.info("No segments found")
         return []
@@ -321,7 +335,7 @@ def run_whisper_rank(
 
 
 def _run_vertical_export(ranked_clips: list[dict]) -> None:
-    """Crop each ranked clip to 9:16 and save to data/outputs/."""
+    """Crop each ranked clip to 9:16, burn subtitles, and save to data/outputs/."""
     out_dir = outputs_dir()
     out_dir.mkdir(parents=True, exist_ok=True)
     exported = 0
@@ -330,12 +344,27 @@ def _run_vertical_export(ranked_clips: list[dict]) -> None:
         if not src.exists():
             continue
         dst = out_dir / src.name
+
+        clip_duration = entry.get("duration_seconds") or (entry["end_sec"] - entry["start_sec"])
+        clip_start = float(entry.get("start_sec", 0))
+        raw_words = entry.get("words") or []
+        adjusted_words = [
+            {"word": w["word"], "start": max(0.0, w["start"] - clip_start), "end": max(0.0, w["end"] - clip_start)}
+            for w in raw_words
+        ]
+        segments = [{
+            "start_sec": 0.0,
+            "end_sec": clip_duration,
+            "text": entry.get("text", ""),
+            "words": adjusted_words,
+        }]
+
         try:
-            crop_to_vertical(src, dst)
+            crop_to_vertical(src, dst, segments=segments)
             exported += 1
         except Exception as e:
-            logger.warning("Vertical crop failed for %s: %s", src.name, e)
-    logger.info("Exported %d vertical clips to %s", exported, out_dir)
+            logger.warning("Vertical crop/subtitle failed for %s: %s", src.name, e)
+    logger.info("Exported %d vertical clips with subtitles to %s", exported, out_dir)
 
 
 def run_refresh(dry_run: bool = False) -> tuple[int, int]:

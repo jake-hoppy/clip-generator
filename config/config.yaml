@@ -43,6 +43,12 @@ title_blocked_keywords:
   - "trailer"
   - "official audio"
   - "official video"
+  - "all scenes"
+  - "every time"
+  - "hours"
+  - "season"
+  - "full episode"
+  - "reaction"
 
 # Whisper: segment boundaries from transcription (merge into this duration range)
 segment_min_duration_seconds: 18.0
@@ -56,13 +62,29 @@ whisper_model: "whisper-1"
 
 # OpenAI: model and optional custom prompt for scoring (1-10)
 openai_model: "gpt-4o-mini"
-# openai_prompt: "..."  # optional; default asks for viral/funny clip potential 1-10
+openai_prompt: |
+  You are scoring Family Guy animated clips for short-form social media virality
+  (TikTok, YouTube Shorts, Instagram Reels). Rate the transcript from 1 to 10.
+
+  Score HIGH (8-10) if: the clip has a clear punchline, ends on a laugh,
+  contains a quotable or relatable joke, has an unexpected twist, or references
+  modern life in a funny way (phones, jobs, social media, relationships).
+  Bonus points if the last line of the transcript IS the punchline/payoff.
+
+  Score LOW (1-4) if: the clip is mid-scene with no payoff, requires episode
+  context to understand, is just characters talking without a joke landing,
+  ends abruptly before the punchline, or contains production credits or
+  watermark text like "Executive Producer" or "Co-Executive Producer".
+
+  Score MEDIUM (5-7) for everything else.
+
+  Reply with ONLY a single number 1-10. No explanation.
 
 # --- Multi-signal scoring ---
 # Enable/disable individual scoring signals (disabled signals have weight redistributed)
 scoring_text: true
 scoring_audio: true
-scoring_visual: true     # uses GPT-4o vision — costs money per clip
+scoring_visual: false     # uses GPT-4o vision — costs money per clip
 
 # --- Scene detection ---
 # Snap Whisper chunk boundaries to nearest scene change for cleaner cuts
@@ -70,7 +92,7 @@ use_scene_detection: true
 
 # --- Vertical export ---
 # After ranking, crop top clips to 9:16 and save to data/outputs/
-export_vertical: false
+export_vertical: true
 
 # --- YouTube Trending ---
 # Set to true to pull from YouTube trending before search queries

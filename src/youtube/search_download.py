@@ -7,6 +7,8 @@ import json
 import logging
 import os
 import subprocess
+import threading
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -130,6 +132,36 @@ def _search_youtube(query: str, max_results: int) -> list[str]:
         except json.JSONDecodeError:
             continue
     return urls
+
+
+def _search_with_metadata(query: str, max_results: int) -> list[dict]:
+    """Search YouTube, return [{url, title_hint, duration_hint}, ...] from flat playlist."""
+    search_str = f"ytsearch{max_results}:{query}"
+    out = _run_yt_dlp([
+        "--dump-json",
+        "--no-download",
+        "--flat-playlist",
+        search_str,
+    ])
+    results = []
+    for line in out.strip().split("\n"):
+        if not line:
+            continue
+        try:
+            entry = json.loads(line)
+            vid = entry.get("id")
+            if vid:
+                results.append({
+                    "url": f"https://www.youtube.com/watch?v={vid}",
+                    "title_hint": entry.get("title") or "",
+                    "duration_hint": float(entry.get("duration") or 0),
+                })
+        except (json.JSONDecodeError, TypeError, ValueError):
+            continue
+    return results
+
+
+_DL_WORKERS = 4
 
 
 def _already_downloaded(video_id: str, ext: str = "mp4") -> bool:
@@ -281,8 +313,18 @@ def build_video_pool(
         queries = queries[:limit_queries]
     for q in queries:
         try:
-            found = _search_youtube(q, fetch_per_query)
-            all_urls.extend(found)
+            found = _search_with_metadata(q, fetch_per_query)
+            for item in found:
+                url = item["url"]
+                title_hint = item.get("title_hint", "")
+                dur_hint = item.get("duration_hint", 0)
+                if title_hint and not _title_passes_filter(title_hint, req_kw, blk_kw):
+                    logger.info("Skipping %s: title pre-filter (%s)", url, title_hint[:60])
+                    continue
+                if dur_hint > 0 and (dur_hint < min_video_duration_seconds or dur_hint > max_video_duration_seconds):
+                    logger.info("Skipping %s: duration pre-filter %.0fs", url, dur_hint)
+                    continue
+                all_urls.append(url)
         except (YtDlpError, json.JSONDecodeError) as e:
             logger.warning("Search failed for query %r: %s", q, e)
             continue
@@ -307,43 +349,60 @@ def build_video_pool(
         return []
 
     results: list[VideoMeta] = []
-    for url in all_urls:
-        if len(results) >= max_total:
-            break
+    _results_lock = threading.Lock()
+
+    def _process_url(url: str) -> VideoMeta | None:
+        with _results_lock:
+            if len(results) >= max_total:
+                return None
         try:
             info = _get_video_info(url)
             title = info.get("title") or "unknown"
 
             if not _title_passes_filter(title, req_kw, blk_kw):
                 logger.info("Skipping %s: title filter failed (%s)", url, title[:60])
-                continue
+                return None
 
             duration = float(info.get("duration") or 0)
             if duration < min_video_duration_seconds or duration > max_video_duration_seconds:
                 logger.info("Skipping %s: duration %.0fs outside range", url, duration)
-                continue
+                return None
 
             video_id = stable_video_id(url, title)
             if _already_downloaded(video_id, download_format):
                 mpath = video_manifest_path(video_id)
                 with open(mpath, encoding="utf-8") as f:
-                    results.append(VideoMeta.from_dict(json.load(f)))
-                if len(results) >= max_total:
-                    break
-                continue
+                    return VideoMeta.from_dict(json.load(f))
 
-            meta = _download_one(
+            with _results_lock:
+                if len(results) >= max_total:
+                    return None
+            return _download_one(
                 url,
                 info=info,
                 download_format=download_format,
                 download_quality=download_quality,
             )
-            results.append(meta)
-            if len(results) >= max_total:
-                break
         except (YtDlpError, json.JSONDecodeError, OSError) as e:
             logger.warning("Failed to process %s: %s", url, e)
-            continue
+            return None
+
+    pool = ThreadPoolExecutor(max_workers=_DL_WORKERS)
+    futures = [pool.submit(_process_url, url) for url in all_urls]
+    try:
+        for fut in as_completed(futures):
+            try:
+                meta = fut.result()
+            except Exception:
+                continue
+            if meta is not None:
+                with _results_lock:
+                    if len(results) < max_total:
+                        results.append(meta)
+                        if len(results) >= max_total:
+                            break
+    finally:
+        pool.shutdown(wait=True, cancel_futures=True)
 
     if len(results) < max_total:
         logger.warning(

@@ -87,6 +87,7 @@ def get_whisper_segments(
                 model=model,
                 file=f,
                 response_format="verbose_json",
+                timestamp_granularities=["word", "segment"],
             )
     finally:
         if should_delete and file_path.exists():
@@ -96,6 +97,9 @@ def get_whisper_segments(
         logger.warning("No segments in Whisper result for %s", video_id)
         return []
 
+    all_words = _extract_words(result)
+    logger.info("Whisper returned %d word-level timestamps for %s", len(all_words), video_id)
+
     merged = _merge_segments(
         result.segments,
         min_duration_sec=min_duration_sec,
@@ -103,14 +107,20 @@ def get_whisper_segments(
         scene_boundaries=scene_boundaries,
     )
     out = []
-    for start, end, text in merged:
+    for start, end, text, _seg_words in merged:
         duration = round(end - start, 2)
+        chunk_words = [w for w in all_words if w["start"] >= start - 0.05 and w["start"] < end + 0.05]
         out.append({
             "start_sec": start,
             "end_sec": end,
             "text": text.strip() if text else "",
             "duration_seconds": duration,
+            "words": chunk_words,
         })
+    if out:
+        logger.debug("First merged segment has %d words (sample: %s)",
+                      len(out[0].get("words", [])),
+                      [w["word"] for w in out[0].get("words", [])[:5]])
     return out
 
 
@@ -126,55 +136,86 @@ def _snap_to_scene(time_sec: float, boundaries: list[float], tolerance: float = 
     return best if best_dist <= tolerance else time_sec
 
 
+def _extract_words(segment) -> list[dict]:
+    """Convert Whisper API word objects to plain dicts for serialisation.
+    Handles both object-style (with .word/.start/.end attrs) and dict-style entries.
+    """
+    raw = getattr(segment, "words", None) or []
+    result = []
+    for w in raw:
+        if isinstance(w, dict):
+            word = w.get("word", "").strip()
+            start = float(w.get("start", 0))
+            end = float(w.get("end", 0))
+        else:
+            word = getattr(w, "word", str(w)).strip()
+            start = float(getattr(w, "start", 0))
+            end = float(getattr(w, "end", 0))
+        if word:
+            result.append({"word": word, "start": start, "end": end})
+    return result
+
+
 def _merge_segments(
     segments: list,
     min_duration_sec: float,
     max_duration_sec: float,
     scene_boundaries: list[float] | None = None,
-) -> list[tuple[float, float, str]]:
+) -> list[tuple[float, float, str, list[dict]]]:
     """
-    Merge consecutive segments so each chunk is between min and max duration.
+    Merge consecutive Whisper segments into chunks between min and max duration.
+    Chunks are emitted once they reach min_duration_sec; the segment that crosses
+    the threshold is included in the emitted chunk so clips aren't cut short.
     When *scene_boundaries* are given, each chunk's end time is snapped to the
-    nearest scene boundary within ±2 s of the natural break point.
-    Returns list of (start_sec, end_sec, combined_text).
+    nearest scene boundary within ±2 s.
+    Returns list of (start_sec, end_sec, combined_text, words).
     """
     if not segments:
         return []
-    out: list[tuple[float, float, str]] = []
+
+    out: list[tuple[float, float, str, list[dict]]] = []
     chunk_start = getattr(segments[0], "start", 0.0)
     chunk_end = getattr(segments[0], "end", 0.0)
-    chunk_text = [getattr(segments[0], "text", "") or ""]
+    chunk_text: list[str] = [getattr(segments[0], "text", "") or ""]
+    chunk_words: list[dict] = _extract_words(segments[0])
+
+    def _snap_end(t: float) -> float:
+        return _snap_to_scene(t, scene_boundaries) if scene_boundaries else t
 
     for s in segments[1:]:
-        start = getattr(s, "start", 0.0)
-        end = getattr(s, "end", 0.0)
-        text = getattr(s, "text", "") or ""
-        candidate_end = end
-        candidate_duration = candidate_end - chunk_start
+        seg_start = getattr(s, "start", 0.0)
+        seg_end = getattr(s, "end", 0.0)
+        seg_text = getattr(s, "text", "") or ""
+        seg_words = _extract_words(s)
 
-        if candidate_duration >= max_duration_sec:
-            emit_end = chunk_end
-            if scene_boundaries:
-                emit_end = _snap_to_scene(emit_end, scene_boundaries)
-            out.append((chunk_start, emit_end, " ".join(chunk_text)))
-            chunk_start = start
-            chunk_end = end
-            chunk_text = [text]
-        elif candidate_duration >= min_duration_sec and (end - chunk_end) > 0.5:
-            emit_end = chunk_end
-            if scene_boundaries:
-                emit_end = _snap_to_scene(emit_end, scene_boundaries)
-            out.append((chunk_start, emit_end, " ".join(chunk_text)))
-            chunk_start = start
-            chunk_end = end
-            chunk_text = [text]
+        if not chunk_text:
+            chunk_start = seg_start
+            chunk_end = seg_end
+            chunk_text = [seg_text]
+            chunk_words = seg_words
+            continue
+
+        would_be = seg_end - chunk_start
+
+        if would_be > max_duration_sec:
+            out.append((chunk_start, _snap_end(chunk_end), " ".join(chunk_text), chunk_words))
+            chunk_start = seg_start
+            chunk_end = seg_end
+            chunk_text = [seg_text]
+            chunk_words = seg_words
+        elif would_be >= min_duration_sec:
+            chunk_end = seg_end
+            chunk_text.append(seg_text)
+            chunk_words.extend(seg_words)
+            out.append((chunk_start, _snap_end(chunk_end), " ".join(chunk_text), chunk_words))
+            chunk_text = []
+            chunk_words = []
         else:
-            chunk_end = end
-            chunk_text.append(text)
+            chunk_end = seg_end
+            chunk_text.append(seg_text)
+            chunk_words.extend(seg_words)
 
-    if chunk_end > chunk_start:
-        emit_end = chunk_end
-        if scene_boundaries:
-            emit_end = _snap_to_scene(emit_end, scene_boundaries)
-        out.append((chunk_start, emit_end, " ".join(chunk_text)))
+    if chunk_text and chunk_end > chunk_start:
+        out.append((chunk_start, _snap_end(chunk_end), " ".join(chunk_text), chunk_words))
+
     return out
