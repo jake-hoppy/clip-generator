@@ -129,6 +129,32 @@ Set **OPENAI_API_KEY** in your environment or in a `.env` file in the project ro
 - Console: INFO by default; use `--verbose` for DEBUG.
 - Full log file: `data/logs/run.log`.
 
+## Local Whisper (faster-whisper)
+
+Transcription now runs locally using faster-whisper — no OpenAI API cost.
+
+### Install
+```bash
+pip install faster-whisper
+```
+
+### First run
+The first time you run `python -m src.main run` or `rank`, faster-whisper will
+automatically download the `large-v2` model (~1.5 GB) and cache it locally.
+This only happens once. Subsequent runs load the cached model in a few seconds.
+
+### Changing model size
+Edit `config/config.yaml`:
+```yaml
+whisper_model: "large-v2"   # best quality, ~1.5GB
+# whisper_model: "medium"   # faster, slightly less accurate, ~760MB
+# whisper_model: "small"    # fastest, ~240MB, good for testing
+```
+
+### Apple Silicon
+faster-whisper auto-detects Apple Silicon (M1/M2/M3/M4) and uses the Metal
+GPU backend automatically. No configuration needed.
+
 ## Design notes
 
 - **Segments:** Whisper API returns timestamped segments; they are merged into chunks of roughly 12–20 s (configurable).

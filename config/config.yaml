@@ -58,7 +58,7 @@ segment_max_duration_seconds: 25.0
 top_n_global: 10
 
 # Whisper API model
-whisper_model: "whisper-1"
+whisper_model: "large-v2"
 
 # OpenAI: model and optional custom prompt for scoring (1-10)
 openai_model: "gpt-4o-mini"
