@@ -1,6 +1,6 @@
 """
 CLI entry for clip-farm.
-Subcommands: download | run | rank | refresh
+Subcommands: download | run | rank | refresh | ingest
 """
 import argparse
 import sys
@@ -13,6 +13,7 @@ from src.utils.logging_setup import setup_logging
 from src.pipeline import (
     load_config,
     run_download,
+    run_ingest,
     run_full,
     run_whisper_rank,
     run_refresh,
@@ -62,6 +63,56 @@ def cmd_rank(args: argparse.Namespace, config: dict) -> None:
     print(f"  Clips ranked:     {len(clips)}")
     print(f"  Output:           {candidates_ranked_dir()}")
     print("=" * 60)
+
+
+def cmd_ingest(args: argparse.Namespace, config: dict) -> None:
+    """
+    Register local MP4 file(s) into the video pool, then optionally rank.
+    After ingesting, run `python -m src.main rank` to process them.
+    With --rank flag, runs the full rank step automatically after ingesting.
+    """
+    video_paths = [Path(p).resolve() for p in args.files]
+    titles = args.title if args.title else None
+
+    missing = [p for p in video_paths if not p.exists()]
+    if missing:
+        for m in missing:
+            print(f"Error: file not found: {m}", file=sys.stderr)
+        return
+
+    videos = run_ingest(
+        video_paths=video_paths,
+        config=config,
+        titles=titles,
+        dry_run=args.dry_run,
+    )
+
+    print("\n" + "=" * 60)
+    print("INGEST SUMMARY")
+    print("=" * 60)
+    if args.dry_run:
+        print("  (dry run — no files written)")
+    print(f"  Files provided:    {len(video_paths)}")
+    print(f"  Videos registered: {len(videos)}")
+    for v in videos:
+        print(f"    - {v.title} ({v.duration_seconds:.0f}s) → {v.video_id}")
+    print("=" * 60)
+
+    if videos and args.rank and not args.dry_run:
+        print("\nRunning rank step on ingested videos...")
+        try:
+            require_ffmpeg()
+        except RuntimeError as e:
+            print(f"Error: {e}", file=sys.stderr)
+            return
+        clips = run_whisper_rank(config, dry_run=False)
+        print("\n" + "=" * 60)
+        print("RANK COMPLETE")
+        print("=" * 60)
+        print(f"  Clips ranked: {len(clips)}")
+        print("=" * 60)
+    elif videos and not args.rank:
+        print("\nNext step: run `python -m src.main rank` to process ingested videos.")
 
 
 def cmd_refresh(args: argparse.Namespace, config: dict) -> None:
@@ -126,6 +177,30 @@ def main() -> int:
     p_refresh.add_argument("--dry-run", action="store_true", help="Only log what would be deleted")
     p_refresh.set_defaults(func=cmd_refresh)
 
+    # ingest — register local MP4 files into the video pool
+    p_ingest = subparsers.add_parser(
+        "ingest",
+        help="Register local MP4 file(s) into the video pool for processing.",
+    )
+    p_ingest.add_argument(
+        "files",
+        nargs="+",
+        help="Path(s) to local MP4 file(s) to ingest",
+    )
+    p_ingest.add_argument(
+        "--title",
+        nargs="*",
+        default=None,
+        help="Optional title(s) for the video(s). One title per file, in order.",
+    )
+    p_ingest.add_argument(
+        "--rank",
+        action="store_true",
+        help="Automatically run the rank step after ingesting",
+    )
+    p_ingest.add_argument("--dry-run", action="store_true", help="Do not write files")
+    p_ingest.set_defaults(func=cmd_ingest)
+
     args = parser.parse_args()
     load_dotenv(project_root() / ".env")
     setup_logging(verbose=args.verbose)
@@ -136,7 +211,7 @@ def main() -> int:
         print(f"Error: {e}", file=sys.stderr)
         return 1
 
-    if args.command in ("run", "rank"):
+    if args.command in ("run", "rank", "ingest"):
         try:
             require_ffmpeg()
         except RuntimeError as e:

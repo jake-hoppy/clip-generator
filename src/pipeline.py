@@ -33,7 +33,7 @@ from src.ai.audio_score import score_audio
 from src.ai.visual_score import score_visual
 from src.ai.scene_segments import get_scene_boundaries
 from src.media.vertical_crop import crop_to_vertical
-from src.utils.paths import video_file_path, outputs_dir
+from src.utils.paths import video_file_path, video_manifest_path, outputs_dir
 
 logger = logging.getLogger(__name__)
 
@@ -89,6 +89,113 @@ def run_download(
     )
 
 
+def run_ingest(
+    video_paths: list[Path],
+    config: dict[str, Any],
+    titles: list[str] | None = None,
+    dry_run: bool = False,
+) -> list[VideoMeta]:
+    """
+    Register one or more local MP4 files into the video pool without downloading.
+    Creates a VideoMeta and manifest JSON for each file so the rank step
+    can process them identically to downloaded videos.
+
+    video_paths: list of absolute paths to local MP4 files
+    titles: optional list of titles, one per video. Falls back to filename stem.
+    dry_run: if True, log what would happen but write nothing.
+
+    Returns list of VideoMeta for successfully registered videos.
+    """
+    import hashlib
+    from datetime import datetime, timezone
+
+    ensure_data_dirs()
+    videos_dir().mkdir(parents=True, exist_ok=True)
+    manifests_videos_dir().mkdir(parents=True, exist_ok=True)
+
+    results: list[VideoMeta] = []
+
+    for i, src_path in enumerate(video_paths):
+        src_path = src_path.resolve()
+        if not src_path.exists():
+            logger.warning("Ingest: file not found, skipping: %s", src_path)
+            continue
+        if src_path.suffix.lower() not in (".mp4", ".mov", ".mkv", ".avi", ".m4v"):
+            logger.warning("Ingest: unsupported format, skipping: %s", src_path)
+            continue
+
+        # Generate a stable video_id from the file path + size
+        # (same file ingested twice gets the same ID — idempotent)
+        file_size = src_path.stat().st_size
+        hash_input = f"{src_path.name}:{file_size}"
+        video_id = "local_" + hashlib.sha1(hash_input.encode()).hexdigest()[:12]
+
+        # Use provided title or fall back to filename stem
+        title = (titles[i] if titles and i < len(titles) else None) or src_path.stem
+        title = title.replace("_", " ").replace("-", " ").strip()
+
+        existing_manifest = video_manifest_path(video_id)
+        dest_path = video_file_path(video_id, "mp4")
+
+        if existing_manifest.exists() and dest_path.exists():
+            logger.info("Already ingested %s (%s), skipping", src_path.name, video_id)
+            with open(existing_manifest, encoding="utf-8") as f:
+                results.append(VideoMeta.from_dict(json.load(f)))
+            continue
+
+        # Get duration via ffprobe
+        try:
+            from src.media.ffmpeg import run_ffprobe
+            out = run_ffprobe([
+                "-v", "error",
+                "-show_entries", "format=duration",
+                "-of", "default=noprint_wrappers=1:nokey=1",
+                str(src_path),
+            ])
+            duration = float(out.strip())
+        except Exception as e:
+            logger.warning("Could not get duration for %s: %s", src_path.name, e)
+            duration = 0.0
+
+        if dry_run:
+            logger.info(
+                "Dry run: would ingest %s -> video_id=%s, title=%r, duration=%.1fs",
+                src_path.name, video_id, title, duration,
+            )
+            continue
+
+        dest_path.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            shutil.copy2(src_path, dest_path)
+            logger.info("Copied %s -> %s", src_path.name, dest_path)
+        except Exception as e:
+            logger.warning("Failed to copy %s: %s", src_path.name, e)
+            continue
+
+        meta = VideoMeta(
+            video_id=video_id,
+            original_url=str(src_path),
+            title=title,
+            uploader="local",
+            duration_seconds=duration,
+            upload_date=None,
+            filename=dest_path.name,
+            download_time=datetime.now(timezone.utc).isoformat(),
+        )
+        with open(existing_manifest, "w", encoding="utf-8") as f:
+            json.dump(meta.to_dict(), f, indent=2)
+
+        logger.info(
+            "Ingested: %s -> video_id=%s, title=%r, duration=%.1fs",
+            src_path.name, video_id, title, duration,
+        )
+        results.append(meta)
+
+    if not dry_run:
+        logger.info("Ingest complete: %d/%d files registered", len(results), len(video_paths))
+    return results
+
+
 def run_full(
     config: dict[str, Any],
     dry_run: bool = False,
@@ -114,13 +221,12 @@ def _resolve_video_path(video_id: str) -> Path | None:
 def _compute_fused_weights(config: dict[str, Any]) -> dict[str, float]:
     """
     Return normalised weights for enabled scoring signals.
-    Base weights: text=0.40, audio=0.35, visual=0.25.
-    Disabled signals have their weight redistributed proportionally.
+    Uses config overrides if present, otherwise falls back to defaults.
     """
     base = {
-        "text": 0.40,
-        "audio": 0.35,
-        "visual": 0.25,
+        "text": config.get("scoring_text_weight", 0.40),
+        "audio": config.get("scoring_audio_weight", 0.35),
+        "visual": config.get("scoring_visual_weight", 0.25),
     }
     enabled = {}
     if config.get("scoring_text", True):

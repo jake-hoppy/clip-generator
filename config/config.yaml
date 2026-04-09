@@ -12,7 +12,7 @@ queries:
 urls: []
 
 # How many search results to take per query (before applying max_videos_total)
-results_per_query: 5
+results_per_query: 3
 
 # Cap total number of source videos across all queries + urls
 max_videos_total: 3
@@ -51,32 +51,40 @@ title_blocked_keywords:
   - "reaction"
 
 # Whisper: segment boundaries from transcription (merge into this duration range)
-segment_min_duration_seconds: 18.0
-segment_max_duration_seconds: 25.0
+segment_min_duration_seconds: 14.0
+segment_max_duration_seconds: 28.0
 
 # Ranking: take top N segments globally (by OpenAI score)
 top_n_global: 10
 
 # Whisper API model
-whisper_model: "large-v2"
+whisper_model: "distil-large-v3"
 
 # OpenAI: model and optional custom prompt for scoring (1-10)
 openai_model: "gpt-4o-mini"
 openai_prompt: |
-  You are scoring Family Guy animated clips for short-form social media virality
-  (TikTok, YouTube Shorts, Instagram Reels). Rate the transcript from 1 to 10.
+  You are scoring Family Guy video clips for TikTok and YouTube Shorts virality.
+  Score on TWO equally-weighted factors — funniness AND completeness. Average them
+  into a single 1-10 score.
 
-  Score HIGH (8-10) if: the clip has a clear punchline, ends on a laugh,
-  contains a quotable or relatable joke, has an unexpected twist, or references
-  modern life in a funny way (phones, jobs, social media, relationships).
-  Bonus points if the last line of the transcript IS the punchline/payoff.
+  FUNNINESS (50%): How funny or quotable is this clip on its own?
+  - HIGH: clear punchline lands, unexpected twist, quotable line, physical comedy
+    with a payoff, Stewie/Brian/Peter being iconic
+  - LOW: just characters walking and talking with no joke, setup with no payoff,
+    purely expository dialogue, credits or production text
 
-  Score LOW (1-4) if: the clip is mid-scene with no payoff, requires episode
-  context to understand, is just characters talking without a joke landing,
-  ends abruptly before the punchline, or contains production credits or
-  watermark text like "Executive Producer" or "Co-Executive Producer".
+  COMPLETENESS (50%): Does the clip work as a self-contained unit?
+  - HIGH: starts cleanly (not mid-sentence), ends at a natural stopping point
+    (punchline, pause, scene change), full joke or exchange is intact,
+    a viewer with no context can follow what's happening
+  - LOW: starts mid-sentence or mid-thought, ends before the punchline or response,
+    joke setup present but punchline missing, would confuse a viewer
 
-  Score MEDIUM (5-7) for everything else.
+  Score HIGH overall (8-10): funny AND complete — the punchline lands AND the clip
+  starts/ends cleanly.
+  Score MEDIUM (5-7): funny but slightly awkward cut, OR clean cut but not the
+  funniest moment.
+  Score LOW (1-4): neither funny nor complete, or contains credits/production text.
 
   Reply with ONLY a single number 1-10. No explanation.
 
@@ -85,6 +93,11 @@ openai_prompt: |
 scoring_text: true
 scoring_audio: true
 scoring_visual: false     # uses GPT-4o vision — costs money per clip
+
+# Scoring signal weights (completeness/text is now the primary signal)
+scoring_text_weight: 0.65
+scoring_audio_weight: 0.35
+scoring_visual_weight: 0.00
 
 # --- Scene detection ---
 # Snap Whisper chunk boundaries to nearest scene change for cleaner cuts
@@ -100,3 +113,5 @@ use_trending: false
 trending_region: "US"
 trending_category_id: "0"   # 0=all, 10=music, 20=gaming, 23=comedy, 24=entertainment
 trending_max_results: 50
+
+# https://freefamilyguy.com/ <--- place to get family guy mp4s

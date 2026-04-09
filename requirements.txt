@@ -16,7 +16,7 @@ scenedetect[opencv]>=0.6
 # YouTube Data API v3 (trending video discovery)
 google-api-python-client>=2.100.0
 
-# Local Whisper transcription (replaces OpenAI Whisper API — free, runs on device)
-faster-whisper>=1.0.0
+# Local Whisper via Apple MLX — uses Apple Silicon GPU natively (free, fast)
+mlx-whisper>=0.4.0
 
 # FFmpeg must be installed separately (brew install ffmpeg / apt install ffmpeg)

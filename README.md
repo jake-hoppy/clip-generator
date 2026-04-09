@@ -129,31 +129,36 @@ Set **OPENAI_API_KEY** in your environment or in a `.env` file in the project ro
 - Console: INFO by default; use `--verbose` for DEBUG.
 - Full log file: `data/logs/run.log`.
 
-## Local Whisper (faster-whisper)
+## Local Whisper (mlx-whisper)
 
-Transcription now runs locally using faster-whisper — no OpenAI API cost.
+Transcription runs locally using mlx-whisper — no OpenAI API cost, and native
+Apple Silicon GPU acceleration via Metal.
 
 ### Install
 ```bash
-pip install faster-whisper
+pip install mlx-whisper
 ```
 
 ### First run
-The first time you run `python -m src.main run` or `rank`, faster-whisper will
-automatically download the `large-v2` model (~1.5 GB) and cache it locally.
+The first time you run `python -m src.main run` or `rank`, mlx-whisper will
+automatically download the model from HuggingFace and cache it locally (~1.5 GB).
 This only happens once. Subsequent runs load the cached model in a few seconds.
+The GPU will be visibly active in Activity Monitor during transcription.
 
 ### Changing model size
 Edit `config/config.yaml`:
 ```yaml
-whisper_model: "large-v2"   # best quality, ~1.5GB
-# whisper_model: "medium"   # faster, slightly less accurate, ~760MB
-# whisper_model: "small"    # fastest, ~240MB, good for testing
+whisper_model: "distil-large-v3"   # fastest, excellent English accuracy (recommended)
+# whisper_model: "medium"          # slightly slower, good accuracy, ~1.5GB
+# whisper_model: "large-v2"        # highest accuracy, ~3GB
 ```
 
 ### Apple Silicon
-faster-whisper auto-detects Apple Silicon (M1/M2/M3/M4) and uses the Metal
-GPU backend automatically. No configuration needed.
+mlx-whisper uses Apple's MLX framework with native Metal GPU support —
+it runs on the Apple Silicon GPU directly. Transcription speed is approximately
+2–4 minutes per 10-minute video on M1/M2/M3/M4.
+
+Transcription speed: approximately 2-4 minutes per 10-minute video on M1/M2/M3.
 
 ## Design notes
 
