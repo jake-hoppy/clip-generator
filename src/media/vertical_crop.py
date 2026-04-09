@@ -1,8 +1,8 @@
 """
-Vertical (9:16) top-stack layout for landscape video clips with optional subtitle burning.
-Landscape sources are scaled to 1080px wide and placed at the top of a 1080×1920 frame
-with black filling the bottom. Subtitles render one word at a time in the black area
-using actual Whisper word-level timestamps when available.
+Vertical (9:16) framing for landscape video clips with optional subtitle burning.
+Landscape sources are zoomed in slightly (trimming some sides), then centred in a
+1080×1920 frame with black bars above and below. Subtitles render three words at a
+time using actual Whisper word-level timestamps when available.
 """
 import json
 import logging
@@ -34,20 +34,30 @@ def crop_to_vertical(
     segments: list[dict] | None = None,
 ) -> None:
     """
-    Place clips inside a 1080×1920 (9:16) frame using a top-stack layout:
-    video fills the top portion at 1080px wide, black fills below.
+    Place clips inside a 1080×1920 (9:16) frame, centred vertically.
+    Landscape sources are zoomed ~35 % (mild side-crop) so the video is
+    larger in the frame, then centred with black bars top and bottom.
     Portrait clips are scaled to fit within 1080×1920.
-    When *segments* are provided, word-by-word subtitles are burned onto
+    When *segments* are provided, 3-word subtitles are burned onto
     the final output as a second pass.
     """
     width, height = _get_dimensions(input_path)
     has_subs = segments and len(segments) > 0
 
     if width > height:
-        vf = "scale=1080:-2,pad=1080:1920:0:0:black"
-        logger.info("Top-stack %s (%dx%d) -> 1080x1920 (9:16)", input_path.name, width, height)
+        zoom = 1.35
+        scaled_w = int(1080 * zoom)
+        if scaled_w % 2:
+            scaled_w += 1
+        vf = (
+            f"scale={scaled_w}:-2,"
+            f"crop=1080:ih:(iw-1080)/2:0,"
+            f"pad=1080:1920:0:(1920-ih)/2:black"
+        )
+        logger.info("Zoom-center %s (%dx%d, %.0f%% zoom) -> 1080x1920 (9:16)",
+                     input_path.name, width, height, zoom * 100)
     else:
-        vf = "scale=-2:1920,pad=1080:1920:(ow-iw)/2:0:black"
+        vf = "scale=-2:1920,pad=1080:1920:(ow-iw)/2:(oh-ih)/2:black"
         logger.info("Portrait fit %s (%dx%d) -> 1080x1920 (9:16)", input_path.name, width, height)
 
     if not has_subs:
@@ -119,8 +129,8 @@ def burn_subtitles(
 def _build_ass_subtitles(segments: list[dict]) -> str:
     """
     Build an ASS subtitle file for a 1080×1920 canvas.
-    Shows one word at a time using Whisper word-level timestamps when
-    available; falls back to 2-word chunks with even distribution.
+    Shows 3 words at a time using Whisper word-level timestamps when
+    available; falls back to 3-word chunks with even distribution.
     """
     def _sec_to_ass(sec: float) -> str:
         h = int(sec // 3600)
@@ -149,15 +159,16 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
         words_ts = seg.get("words") or []
 
         if words_ts:
-            for word_entry in words_ts:
-                word = word_entry["word"].strip()
-                if not word:
+            for i in range(0, len(words_ts), 3):
+                group = words_ts[i:i + 3]
+                chunk_text = " ".join(w["word"].strip() for w in group)
+                if not chunk_text:
                     continue
-                w_start = float(word_entry["start"])
-                w_end = float(word_entry["end"])
+                w_start = float(group[0]["start"])
+                w_end = float(group[-1]["end"])
                 if w_end <= w_start:
-                    w_end = w_start + 0.1
-                safe = word.replace("\\", "\\\\").replace("{", "\\{").replace("}", "\\}")
+                    w_end = w_start + 0.15
+                safe = chunk_text.replace("\\", "\\\\").replace("{", "\\{").replace("}", "\\}")
                 events.append(
                     f"Dialogue: 0,{_sec_to_ass(w_start)},{_sec_to_ass(w_end)},"
                     f"Default,,0,0,0,,{safe}"
@@ -169,7 +180,7 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
             word_list = text.split()
             if not word_list:
                 continue
-            chunks = [" ".join(word_list[i:i + 2]) for i in range(0, len(word_list), 2)]
+            chunks = [" ".join(word_list[i:i + 3]) for i in range(0, len(word_list), 3)]
             chunk_duration = (end - start) / len(chunks)
             for j, chunk in enumerate(chunks):
                 chunk_start = start + j * chunk_duration
