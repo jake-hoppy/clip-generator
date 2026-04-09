@@ -23,10 +23,14 @@ from src.utils.paths import (
     manifests_candidates_ranked_dir,
 )
 from src.media.ffmpeg import require_ffmpeg, extract_clip
-from src.youtube.search_download import build_video_pool, VideoMeta
+from src.youtube.search_download import build_video_pool, VideoMeta, get_trending_urls
 from src.ai.whisper_segments import get_whisper_segments
 from src.ai.openai_score import score_segment
-from src.utils.paths import video_file_path
+from src.ai.audio_score import score_audio
+from src.ai.visual_score import score_visual
+from src.ai.scene_segments import get_scene_boundaries
+from src.media.vertical_crop import crop_to_vertical
+from src.utils.paths import video_file_path, outputs_dir
 
 logger = logging.getLogger(__name__)
 
@@ -45,11 +49,26 @@ def run_download(
     limit_videos: int | None = None,
     limit_queries: int | None = None,
 ) -> list[VideoMeta]:
-    """Download step only: build video pool from queries + urls."""
+    """Download step only: build video pool from queries + urls (+ optional trending)."""
     ensure_data_dirs()
+
+    urls = list(config.get("urls", []) or [])
+
+    if config.get("use_trending", False):
+        try:
+            trending = get_trending_urls(
+                region_code=config.get("trending_region", "US"),
+                category_id=str(config.get("trending_category_id", "0")),
+                max_results=int(config.get("trending_max_results", 50)),
+            )
+            urls = trending + urls
+            logger.info("Prepended %d trending URLs to pool", len(trending))
+        except Exception as e:
+            logger.warning("Trending fetch failed, continuing without: %s", e)
+
     return build_video_pool(
         queries=config.get("queries", []) or [],
-        urls=config.get("urls", []) or [],
+        urls=urls,
         results_per_query=int(config.get("results_per_query", 10)),
         max_videos_total=int(config.get("max_videos_total", 25)),
         download_format=config.get("download_format", "mp4"),
@@ -59,6 +78,9 @@ def run_download(
         dry_run=dry_run,
         limit_videos=limit_videos,
         limit_queries=limit_queries,
+        title_required_keywords=config.get("title_required_keywords") or [],
+        title_blocked_keywords=config.get("title_blocked_keywords") or [],
+        download_quality=config.get("download_quality", "best"),
     )
 
 
@@ -84,14 +106,40 @@ def _resolve_video_path(video_id: str) -> Path | None:
     return None
 
 
+def _compute_fused_weights(config: dict[str, Any]) -> dict[str, float]:
+    """
+    Return normalised weights for enabled scoring signals.
+    Base weights: text=0.40, audio=0.35, visual=0.25.
+    Disabled signals have their weight redistributed proportionally.
+    """
+    base = {
+        "text": 0.40,
+        "audio": 0.35,
+        "visual": 0.25,
+    }
+    enabled = {}
+    if config.get("scoring_text", True):
+        enabled["text"] = base["text"]
+    if config.get("scoring_audio", True):
+        enabled["audio"] = base["audio"]
+    if config.get("scoring_visual", False):
+        enabled["visual"] = base["visual"]
+    if not enabled:
+        return {"text": 1.0, "audio": 0.0, "visual": 0.0}
+    total = sum(enabled.values())
+    return {k: enabled.get(k, 0.0) / total for k in base}
+
+
 def run_whisper_rank(
     config: dict[str, Any],
     dry_run: bool = False,
 ) -> list[dict]:
     """
-    Get segments from Whisper API per video, score each with OpenAI (gpt-4o-mini), rank globally.
-    Extract all segments to data/candidates/<video_id>/, write manifests to data/manifests/candidates/.
-    Take top N by score; copy to data/candidates_ranked/ and write manifest. Leave data/outputs/ empty.
+    Get segments from Whisper API per video, score each with multi-signal
+    fusion (text + audio + visual), rank globally.
+    Extract all segments to data/candidates/<video_id>/, write manifests.
+    Take top N by fused score; copy to data/candidates_ranked/.
+    Optionally export vertical (9:16) crops to data/outputs/.
     """
     require_ffmpeg()
     ensure_data_dirs()
@@ -100,7 +148,13 @@ def run_whisper_rank(
     max_duration = float(config.get("segment_max_duration_seconds", 20.0))
     whisper_model = config.get("whisper_model", "whisper-1")
     openai_model = config.get("openai_model", "gpt-4o-mini")
-    openai_prompt = config.get("openai_prompt")  # None = use default in openai_score
+    openai_prompt = config.get("openai_prompt")
+
+    use_scene = config.get("use_scene_detection", True)
+    weights = _compute_fused_weights(config)
+    do_text = config.get("scoring_text", True)
+    do_audio = config.get("scoring_audio", True)
+    do_visual = config.get("scoring_visual", False)
 
     manifests_videos_dir().mkdir(parents=True, exist_ok=True)
     manifests_candidates_dir().mkdir(parents=True, exist_ok=True)
@@ -119,6 +173,15 @@ def run_whisper_rank(
         except Exception:
             video_title = ""
 
+        # Scene detection (optional)
+        scene_boundaries: list[float] | None = None
+        if use_scene:
+            try:
+                scene_boundaries = get_scene_boundaries(video_path)
+                logger.info("Detected %d scene boundaries for %s", len(scene_boundaries), video_id)
+            except Exception as e:
+                logger.warning("Scene detection failed for %s, proceeding without: %s", video_id, e)
+
         try:
             raw_segments = get_whisper_segments(
                 video_path,
@@ -126,6 +189,7 @@ def run_whisper_rank(
                 min_duration_sec=min_duration,
                 max_duration_sec=max_duration,
                 model=whisper_model,
+                scene_boundaries=scene_boundaries,
             )
         except Exception as e:
             logger.warning("Whisper failed for %s: %s", video_id, e)
@@ -144,18 +208,48 @@ def run_whisper_rank(
             seg["filepath"] = str(cand_path)
 
             if not dry_run:
-                try:
-                    score = score_segment(
-                        seg["text"],
-                        video_title=video_title or None,
-                        model=openai_model,
-                        prompt_override=openai_prompt,
-                    )
-                except Exception as e:
-                    logger.warning("Scoring failed for %s: %s", clip_id, e)
-                    score = 0.0
-                seg["score"] = round(score, 2)
+                # --- Text score ---
+                text_score = 0.0
+                if do_text:
+                    try:
+                        text_score = score_segment(
+                            seg["text"],
+                            video_title=video_title or None,
+                            model=openai_model,
+                            prompt_override=openai_prompt,
+                        )
+                    except Exception as e:
+                        logger.warning("Text scoring failed for %s: %s", clip_id, e)
+
+                # --- Audio score ---
+                audio_score_val = 0.0
+                if do_audio:
+                    try:
+                        audio_score_val = score_audio(video_path, seg["start_sec"], seg["end_sec"])
+                    except Exception as e:
+                        logger.warning("Audio scoring failed for %s: %s", clip_id, e)
+
+                # --- Visual score ---
+                visual_score_val = 0.0
+                if do_visual:
+                    try:
+                        visual_score_val = score_visual(video_path, seg["start_sec"], seg["end_sec"])
+                    except Exception as e:
+                        logger.warning("Visual scoring failed for %s: %s", clip_id, e)
+
+                fused = (
+                    text_score * weights["text"]
+                    + audio_score_val * weights["audio"]
+                    + visual_score_val * weights["visual"]
+                )
+                seg["text_score"] = round(text_score, 2)
+                seg["audio_score"] = round(audio_score_val, 2)
+                seg["visual_score"] = round(visual_score_val, 2)
+                seg["score"] = round(fused, 2)
             else:
+                seg["text_score"] = 0.0
+                seg["audio_score"] = 0.0
+                seg["visual_score"] = 0.0
                 seg["score"] = 0.0
 
             if dry_run:
@@ -218,7 +312,30 @@ def run_whisper_rank(
     with open(manifest_path, "w", encoding="utf-8") as f:
         json.dump({"top_n": top_n, "clips": manifest_list}, f, indent=2)
     logger.info("Wrote candidates to %s, top %d ranked to %s", candidates_dir(), len(manifest_list), rank_dir)
+
+    # --- Vertical export (optional) ---
+    if config.get("export_vertical", False):
+        _run_vertical_export(manifest_list)
+
     return manifest_list
+
+
+def _run_vertical_export(ranked_clips: list[dict]) -> None:
+    """Crop each ranked clip to 9:16 and save to data/outputs/."""
+    out_dir = outputs_dir()
+    out_dir.mkdir(parents=True, exist_ok=True)
+    exported = 0
+    for entry in ranked_clips:
+        src = Path(entry["filepath"])
+        if not src.exists():
+            continue
+        dst = out_dir / src.name
+        try:
+            crop_to_vertical(src, dst)
+            exported += 1
+        except Exception as e:
+            logger.warning("Vertical crop failed for %s: %s", src.name, e)
+    logger.info("Exported %d vertical clips to %s", exported, out_dir)
 
 
 def run_refresh(dry_run: bool = False) -> tuple[int, int]:

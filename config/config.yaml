@@ -2,20 +2,26 @@
 
 # Search queries (yt-dlp will search YouTube for each)
 queries:
-  - "friends funniest moments"
-  - "the office best moments"
+  - "Family Guy funny moments"
+  - "Family Guy best cutaway gags"
+  - "Family Guy compilation"
+  - "Family Guy Peter Griffin moments"
+  - "Family Guy Stewie moments"
 
 # Optional: direct YouTube URLs to include in the pool
 urls: []
 
 # How many search results to take per query (before applying max_videos_total)
-results_per_query: 10
+results_per_query: 5
 
 # Cap total number of source videos across all queries + urls
-max_videos_total: 25
+max_videos_total: 3
 
 # Download format (prefer mp4 for compatibility)
 download_format: "mp4"
+
+# Download quality — "best" for production, "480p" for fast testing
+download_quality: "480p"
 
 # Filter source videos by duration (seconds)
 min_video_duration_seconds: 60
@@ -24,12 +30,26 @@ max_video_duration_seconds: 1800
 # Deterministic ordering for download (optional)
 seed: 42
 
+# --- Title filter ---
+# At least one required keyword must appear in title (empty = no requirement)
+title_required_keywords:
+  - "family guy"
+
+# Videos containing any blocked keyword are skipped immediately
+title_blocked_keywords:
+  - "music"
+  - "song"
+  - "lyrics"
+  - "trailer"
+  - "official audio"
+  - "official video"
+
 # Whisper: segment boundaries from transcription (merge into this duration range)
-segment_min_duration_seconds: 12.0
-segment_max_duration_seconds: 20.0
+segment_min_duration_seconds: 18.0
+segment_max_duration_seconds: 25.0
 
 # Ranking: take top N segments globally (by OpenAI score)
-top_n_global: 20
+top_n_global: 10
 
 # Whisper API model
 whisper_model: "whisper-1"
@@ -37,3 +57,24 @@ whisper_model: "whisper-1"
 # OpenAI: model and optional custom prompt for scoring (1-10)
 openai_model: "gpt-4o-mini"
 # openai_prompt: "..."  # optional; default asks for viral/funny clip potential 1-10
+
+# --- Multi-signal scoring ---
+# Enable/disable individual scoring signals (disabled signals have weight redistributed)
+scoring_text: true
+scoring_audio: true
+scoring_visual: true     # uses GPT-4o vision — costs money per clip
+
+# --- Scene detection ---
+# Snap Whisper chunk boundaries to nearest scene change for cleaner cuts
+use_scene_detection: true
+
+# --- Vertical export ---
+# After ranking, crop top clips to 9:16 and save to data/outputs/
+export_vertical: false
+
+# --- YouTube Trending ---
+# Set to true to pull from YouTube trending before search queries
+use_trending: false
+trending_region: "US"
+trending_category_id: "0"   # 0=all, 10=music, 20=gaming, 23=comedy, 24=entertainment
+trending_max_results: 50

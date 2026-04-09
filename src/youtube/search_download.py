@@ -1,9 +1,11 @@
 """
 YouTube search + download via yt-dlp (subprocess).
-Supports search queries and direct URLs; idempotent (skips if file + manifest exist).
+Supports search queries, direct URLs, and YouTube Trending (via Data API v3).
+Idempotent (skips if file + manifest exist).
 """
 import json
 import logging
+import os
 import subprocess
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
@@ -137,22 +139,35 @@ def _already_downloaded(video_id: str, ext: str = "mp4") -> bool:
     return vpath.exists() and mpath.exists()
 
 
+def _title_passes_filter(title: str, required: list[str], blocked: list[str]) -> bool:
+    """Return False if title contains blocked keywords or lacks required keywords."""
+    title_lower = title.lower()
+    if any(kw.lower() in title_lower for kw in blocked):
+        return False
+    if required and not any(kw.lower() in title_lower for kw in required):
+        return False
+    return True
+
+
+_FORMAT_STRINGS = {
+    "480p": "best[height<=480][ext=mp4]/best[height<=480]/worst[ext=mp4]/worst",
+    "720p": "best[height<=720][ext=mp4]/best[height<=720]/best[ext=mp4]/best",
+    "best": "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best",
+}
+
+
 def _download_one(
     url: str,
+    info: dict,
     download_format: str = "mp4",
-    min_duration: float = 0,
-    max_duration: float = 1e9,
-) -> VideoMeta | None:
+    download_quality: str = "best",
+) -> VideoMeta:
     """
-    Download one video. Returns VideoMeta or None if skipped (duration filter).
+    Download one video given its pre-fetched info dict.
+    Raises on failure; caller is responsible for duration/title filtering.
     """
-    info = _get_video_info(url)
-    duration = float(info.get("duration") or 0)
-    if duration < min_duration or duration > max_duration:
-        logger.info("Skipping %s: duration %.0fs outside [%s, %s]", url, duration, min_duration, max_duration)
-        return None
-
     title = info.get("title") or "unknown"
+    duration = float(info.get("duration") or 0)
     video_id = stable_video_id(url, title)
     uploader = info.get("uploader") or ""
     upload_date = info.get("upload_date")
@@ -164,16 +179,15 @@ def _download_one(
         with open(manifest_path, encoding="utf-8") as f:
             return VideoMeta.from_dict(json.load(f))
 
-    # Download
+    fmt_str = _FORMAT_STRINGS.get(download_quality, _FORMAT_STRINGS["best"])
     _run_yt_dlp([
-        "-f", "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best",
+        "-f", fmt_str,
         "-o", str(out_path),
         "--no-playlist",
         url,
     ], timeout=900)
 
     if not out_path.exists():
-        # yt-dlp might have used a different extension
         candidates = list(out_path.parent.glob(f"{out_path.stem}.*"))
         if not candidates:
             raise YtDlpError(f"Download did not produce file at {out_path}", command=[], stderr="", returncode=-1)
@@ -195,6 +209,43 @@ def _download_one(
     return meta
 
 
+def get_trending_urls(
+    region_code: str = "US",
+    category_id: str = "0",
+    max_results: int = 50,
+) -> list[str]:
+    """
+    Fetch currently trending YouTube video URLs via the YouTube Data API v3.
+    Requires the YOUTUBE_API_KEY environment variable to be set.
+    """
+    api_key = os.environ.get("YOUTUBE_API_KEY")
+    if not api_key or not api_key.strip():
+        raise RuntimeError(
+            "YOUTUBE_API_KEY is not set. "
+            "Get one at https://console.cloud.google.com/apis/credentials "
+            "and enable the YouTube Data API v3."
+        )
+
+    from googleapiclient.discovery import build as build_service
+
+    youtube = build_service("youtube", "v3", developerKey=api_key)
+    request = youtube.videos().list(
+        part="id",
+        chart="mostPopular",
+        regionCode=region_code,
+        videoCategoryId=category_id,
+        maxResults=min(max_results, 50),
+    )
+    response = request.execute()
+
+    urls: list[str] = []
+    for item in response.get("items", []):
+        vid = item["id"]
+        urls.append(f"https://www.youtube.com/watch?v={vid}")
+    logger.info("Fetched %d trending video URLs (region=%s, category=%s)", len(urls), region_code, category_id)
+    return urls
+
+
 def build_video_pool(
     queries: list[str],
     urls: list[str],
@@ -207,16 +258,22 @@ def build_video_pool(
     dry_run: bool = False,
     limit_videos: int | None = None,
     limit_queries: int | None = None,
+    title_required_keywords: list[str] | None = None,
+    title_blocked_keywords: list[str] | None = None,
+    download_quality: str = "best",
 ) -> list[VideoMeta]:
     """
     Build pool of source videos: search each query, add direct URLs, download (or skip if exists).
+    Filters by title keywords and duration before downloading.
     Returns list of VideoMeta for downloaded/skipped videos. Idempotent.
     """
     videos_dir().mkdir(parents=True, exist_ok=True)
     manifests_videos_dir().mkdir(parents=True, exist_ok=True)
 
+    req_kw = title_required_keywords or []
+    blk_kw = title_blocked_keywords or []
+
     max_total = limit_videos if limit_videos is not None else max_videos_total
-    # Fetch enough candidates so we can keep trying until we hit max_total (many may fail duration filter)
     fetch_per_query = min(50, max(results_per_query, max_total * 15))
 
     all_urls: list[str] = []
@@ -230,7 +287,6 @@ def build_video_pool(
             logger.warning("Search failed for query %r: %s", q, e)
             continue
 
-    # Add direct URLs (dedupe by normalized URL)
     seen = {u.rstrip("/") for u in all_urls}
     for u in urls:
         u = u.strip()
@@ -243,7 +299,6 @@ def build_video_pool(
         rng = random.Random(seed)
         rng.shuffle(all_urls)
 
-    # Cap how many URLs we'll try (avoid unbounded loop); we need at least enough to try for max_total
     max_candidates = max(len(all_urls), max_total * 20)
     all_urls = all_urls[:max_candidates]
 
@@ -257,11 +312,17 @@ def build_video_pool(
             break
         try:
             info = _get_video_info(url)
+            title = info.get("title") or "unknown"
+
+            if not _title_passes_filter(title, req_kw, blk_kw):
+                logger.info("Skipping %s: title filter failed (%s)", url, title[:60])
+                continue
+
             duration = float(info.get("duration") or 0)
             if duration < min_video_duration_seconds or duration > max_video_duration_seconds:
                 logger.info("Skipping %s: duration %.0fs outside range", url, duration)
                 continue
-            title = info.get("title") or "unknown"
+
             video_id = stable_video_id(url, title)
             if _already_downloaded(video_id, download_format):
                 mpath = video_manifest_path(video_id)
@@ -270,23 +331,23 @@ def build_video_pool(
                 if len(results) >= max_total:
                     break
                 continue
+
             meta = _download_one(
                 url,
+                info=info,
                 download_format=download_format,
-                min_duration=min_video_duration_seconds,
-                max_duration=max_video_duration_seconds,
+                download_quality=download_quality,
             )
-            if meta:
-                results.append(meta)
-                if len(results) >= max_total:
-                    break
+            results.append(meta)
+            if len(results) >= max_total:
+                break
         except (YtDlpError, json.JSONDecodeError, OSError) as e:
             logger.warning("Failed to process %s: %s", url, e)
             continue
 
     if len(results) < max_total:
         logger.warning(
-            "Only found %d video(s) within duration range (target was %d). Try relaxing min/max duration or more queries.",
+            "Only found %d video(s) matching filters (target was %d). Try relaxing filters or adding more queries.",
             len(results),
             max_total,
         )

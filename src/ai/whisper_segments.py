@@ -63,11 +63,16 @@ def get_whisper_segments(
     min_duration_sec: float = 12.0,
     max_duration_sec: float = 20.0,
     model: str = "whisper-1",
+    scene_boundaries: list[float] | None = None,
 ) -> list[dict]:
     """
     Run Whisper API on the video (or extracted audio) and return segments.
     Merges consecutive Whisper segments so each output segment is between
     min_duration_sec and max_duration_sec (where possible).
+
+    When *scene_boundaries* are provided, chunk break points are nudged to
+    the nearest scene boundary within ±2 seconds, producing visually cleaner cuts.
+
     Returns list of dicts: start_sec, end_sec, text, duration_seconds.
     """
     if not video_path.exists():
@@ -91,11 +96,11 @@ def get_whisper_segments(
         logger.warning("No segments in Whisper result for %s", video_id)
         return []
 
-    # Merge segments into chunks of target duration
     merged = _merge_segments(
         result.segments,
         min_duration_sec=min_duration_sec,
         max_duration_sec=max_duration_sec,
+        scene_boundaries=scene_boundaries,
     )
     out = []
     for start, end, text in merged:
@@ -109,13 +114,28 @@ def get_whisper_segments(
     return out
 
 
+def _snap_to_scene(time_sec: float, boundaries: list[float], tolerance: float = 2.0) -> float:
+    """Return the nearest scene boundary within ±tolerance, or time_sec unchanged."""
+    best = time_sec
+    best_dist = tolerance + 1.0
+    for b in boundaries:
+        dist = abs(b - time_sec)
+        if dist < best_dist:
+            best_dist = dist
+            best = b
+    return best if best_dist <= tolerance else time_sec
+
+
 def _merge_segments(
     segments: list,
     min_duration_sec: float,
     max_duration_sec: float,
+    scene_boundaries: list[float] | None = None,
 ) -> list[tuple[float, float, str]]:
     """
     Merge consecutive segments so each chunk is between min and max duration.
+    When *scene_boundaries* are given, each chunk's end time is snapped to the
+    nearest scene boundary within ±2 s of the natural break point.
     Returns list of (start_sec, end_sec, combined_text).
     """
     if not segments:
@@ -133,22 +153,28 @@ def _merge_segments(
         candidate_duration = candidate_end - chunk_start
 
         if candidate_duration >= max_duration_sec:
-            # Emit current chunk
-            out.append((chunk_start, chunk_end, " ".join(chunk_text)))
+            emit_end = chunk_end
+            if scene_boundaries:
+                emit_end = _snap_to_scene(emit_end, scene_boundaries)
+            out.append((chunk_start, emit_end, " ".join(chunk_text)))
             chunk_start = start
             chunk_end = end
             chunk_text = [text]
         elif candidate_duration >= min_duration_sec and (end - chunk_end) > 0.5:
-            # Could emit now; emit and start new
-            out.append((chunk_start, chunk_end, " ".join(chunk_text)))
+            emit_end = chunk_end
+            if scene_boundaries:
+                emit_end = _snap_to_scene(emit_end, scene_boundaries)
+            out.append((chunk_start, emit_end, " ".join(chunk_text)))
             chunk_start = start
             chunk_end = end
             chunk_text = [text]
         else:
-            # Extend current chunk
             chunk_end = end
             chunk_text.append(text)
 
     if chunk_end > chunk_start:
-        out.append((chunk_start, chunk_end, " ".join(chunk_text)))
+        emit_end = chunk_end
+        if scene_boundaries:
+            emit_end = _snap_to_scene(emit_end, scene_boundaries)
+        out.append((chunk_start, emit_end, " ".join(chunk_text)))
     return out
