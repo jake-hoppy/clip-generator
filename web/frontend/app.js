@@ -3,7 +3,7 @@
  */
 const API = window.location.origin;
 
-let currentPage = 'ingest';
+let currentPage = 'dashboard';
 let logPollInterval = null;
 let statusPollInterval = null;
 let runPollInterval = null;
@@ -1234,6 +1234,5 @@ if (spliceFiles) {
   });
 }
 
-loadIngested();
-loadOutputs();
+refreshDashboard();
 startStatusPolling();

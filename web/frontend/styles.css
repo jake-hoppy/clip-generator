@@ -125,6 +125,38 @@ body {
 
 .page-title { font-size: 20px; font-weight: 600; }
 
+.page-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.page-header-actions-spacer {
+  flex: 1;
+  min-width: 12px;
+}
+
+.btn-icon {
+  width: 34px;
+  height: 34px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--radius-sm);
+  color: var(--text-muted);
+}
+.btn-icon:hover {
+  color: var(--accent);
+  border-color: var(--border-hover);
+}
+.btn-icon svg {
+  width: 17px;
+  height: 17px;
+  flex-shrink: 0;
+}
+
 .card {
   background: var(--bg-card);
   border: 1px solid var(--border);

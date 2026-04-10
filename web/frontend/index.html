@@ -14,19 +14,19 @@
     clip farm
   </div>
 
-  <!-- PRIMARY — ingest-first -->
-  <div class="nav-section">create</div>
-  <div class="nav-item active" data-page="ingest">
+  <!-- PRIMARY — dashboard home -->
+  <div class="nav-section">home</div>
+  <div class="nav-item active" data-page="dashboard">
+    <svg viewBox="0 0 16 16" fill="currentColor"><rect x="1" y="1" width="6" height="6" rx="1"/><rect x="9" y="1" width="6" height="6" rx="1"/><rect x="1" y="9" width="6" height="6" rx="1"/><rect x="9" y="9" width="6" height="6" rx="1"/></svg>
+    Dashboard
+  </div>
+  <div class="nav-item" data-page="ingest">
     <svg viewBox="0 0 16 16" fill="currentColor"><path d="M8 1v9M4 6l4-4 4 4M2 13h12v2H2z"/></svg>
     Ingest video
   </div>
   <div class="nav-item" data-page="library">
     <svg viewBox="0 0 16 16" fill="currentColor"><path d="M2 2h3v12H2zm4 0h3v12H6zm4 0h4v12h-4z"/></svg>
     Library
-  </div>
-  <div class="nav-item" data-page="dashboard">
-    <svg viewBox="0 0 16 16" fill="currentColor"><rect x="1" y="1" width="6" height="6" rx="1"/><rect x="9" y="1" width="6" height="6" rx="1"/><rect x="1" y="9" width="6" height="6" rx="1"/><rect x="9" y="9" width="6" height="6" rx="1"/></svg>
-    Dashboard
   </div>
 
   <!-- SECONDARY — YouTube pipeline, de-emphasized -->
@@ -61,12 +61,19 @@
 <main class="main">
 
   <!-- Dashboard -->
-  <div class="page" id="page-dashboard">
+  <div class="page active" id="page-dashboard">
     <div class="page-header">
       <h1 class="page-title">Dashboard</h1>
-      <div style="display:flex;gap:8px">
-        <button class="btn" onclick="refreshDashboard()">↺ Refresh</button>
-        <button class="btn btn-primary" onclick="navigate('run')">▶ Run pipeline</button>
+      <div class="page-header-actions">
+        <button type="button" class="btn" onclick="refreshDashboard()">↺ Refresh</button>
+        <button type="button" class="btn btn-primary" onclick="navigate('ingest')">↑ Ingest video</button>
+        <span class="page-header-actions-spacer" aria-hidden="true"></span>
+        <button type="button" class="btn btn-icon" onclick="navigate('library')" title="Library" aria-label="Open library">
+          <svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M2 2h3v12H2zm4 0h3v12H6zm4 0h4v12h-4z"/></svg>
+        </button>
+        <button type="button" class="btn btn-icon" onclick="navigate('config')" title="Configuration" aria-label="Open configuration">
+          <svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M9.405 1.05c-.413-1.4-2.397-1.4-2.81 0l-.1.34a1.464 1.464 0 0 1-2.105.872l-.31-.17c-1.283-.698-2.686.705-1.987 1.987l.169.311c.446.82.023 1.841-.872 2.105l-.34.1c-1.4.413-1.4 2.397 0 2.81l.34.1a1.464 1.464 0 0 1 .872 2.105l-.17.31c-.698 1.283.705 2.686 1.987 1.987l.311-.169a1.464 1.464 0 0 1 2.105.872l.1.34c.413 1.4 2.397 1.4 2.81 0l.1-.34a1.464 1.464 0 0 1 2.105-.872l.31.17c1.283.698 2.686-.705 1.987-1.987l-.169-.311a1.464 1.464 0 0 1 .872-2.105l.34-.1c1.4-.413 1.4-2.397 0-2.81l-.34-.1a1.464 1.464 0 0 1-.872-2.105l.17-.31c.698-1.283-.705-2.686-1.987-1.987l-.311.169a1.464 1.464 0 0 1-2.105-.872l-.1-.34zM8 10.93a2.929 2.929 0 1 1 0-5.86 2.929 2.929 0 0 1 0 5.858z"/></svg>
+        </button>
       </div>
     </div>
 
@@ -186,7 +193,7 @@
   </div>
 
   <!-- Ingest — CENTER STAGE -->
-  <div class="page active" id="page-ingest">
+  <div class="page" id="page-ingest">
     <div class="page-header">
       <h1 class="page-title">Ingest video</h1>
       <span style="font-size:13px;color:var(--text-muted)">Upload an MP4 to transcribe, score, and clip</span>
