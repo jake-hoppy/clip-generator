@@ -1,6 +1,6 @@
 """
 CLI entry for clip-farm.
-Subcommands: download | run | rank | refresh | ingest
+Subcommands: download | run | rank | refresh | ingest | splice
 """
 import argparse
 import sys
@@ -15,6 +15,7 @@ from src.pipeline import (
     run_download,
     run_ingest,
     run_full,
+    run_splice,
     run_whisper_rank,
     run_refresh,
     print_summary,
@@ -115,6 +116,34 @@ def cmd_ingest(args: argparse.Namespace, config: dict) -> None:
         print("\nNext step: run `python -m src.main rank` to process ingested videos.")
 
 
+def cmd_splice(args: argparse.Namespace, config: dict) -> None:
+    """Ingest local file(s) and rank only those videos (no download / queries)."""
+    video_paths = [Path(p).resolve() for p in args.files]
+    titles = args.title if args.title else None
+
+    missing = [p for p in video_paths if not p.exists()]
+    if missing:
+        for m in missing:
+            print(f"Error: file not found: {m}", file=sys.stderr)
+        return
+
+    clips = run_splice(
+        video_paths=video_paths,
+        config=config,
+        titles=titles,
+        dry_run=args.dry_run,
+    )
+    print("\n" + "=" * 60)
+    print("SPLICE (ingest + rank on uploaded files only)")
+    print("=" * 60)
+    if args.dry_run:
+        print("  (dry run — no files written)")
+    print(f"  Files:        {len(video_paths)}")
+    print(f"  Clips ranked: {len(clips)}")
+    print(f"  Output:       {candidates_ranked_dir()}")
+    print("=" * 60)
+
+
 def cmd_refresh(args: argparse.Namespace, config: dict) -> None:
     clips_dirs, manifest_files = run_refresh(dry_run=args.dry_run)
     print("\n" + "=" * 60)
@@ -201,6 +230,25 @@ def main() -> int:
     p_ingest.add_argument("--dry-run", action="store_true", help="Do not write files")
     p_ingest.set_defaults(func=cmd_ingest)
 
+    # splice — ingest + rank only on given local files (no YouTube / queries)
+    p_splice = subparsers.add_parser(
+        "splice",
+        help="Ingest local video file(s) and run Whisper + rank on those files only.",
+    )
+    p_splice.add_argument(
+        "files",
+        nargs="+",
+        help="Path(s) to local video file(s) (.mp4, .mov, .mkv, …)",
+    )
+    p_splice.add_argument(
+        "--title",
+        nargs="*",
+        default=None,
+        help="Optional title(s), one per file in order",
+    )
+    p_splice.add_argument("--dry-run", action="store_true", help="Do not write files")
+    p_splice.set_defaults(func=cmd_splice)
+
     args = parser.parse_args()
     load_dotenv(project_root() / ".env")
     setup_logging(verbose=args.verbose)
@@ -211,7 +259,7 @@ def main() -> int:
         print(f"Error: {e}", file=sys.stderr)
         return 1
 
-    if args.command in ("run", "rank", "ingest"):
+    if args.command in ("run", "rank", "ingest", "splice"):
         try:
             require_ffmpeg()
         except RuntimeError as e:

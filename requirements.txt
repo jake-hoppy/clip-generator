@@ -19,4 +19,9 @@ google-api-python-client>=2.100.0
 # Local Whisper via Apple MLX — uses Apple Silicon GPU natively (free, fast)
 mlx-whisper>=0.4.0
 
+# Web UI (optional): cd to repo root, then:
+#   uvicorn web.backend.main:app --reload --port 8000
+fastapi>=0.100.0
+uvicorn[standard]>=0.23.0
+
 # FFmpeg must be installed separately (brew install ffmpeg / apt install ffmpeg)

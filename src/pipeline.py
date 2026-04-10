@@ -241,9 +241,32 @@ def _compute_fused_weights(config: dict[str, Any]) -> dict[str, float]:
     return {k: enabled.get(k, 0.0) / total for k in base}
 
 
+def run_splice(
+    video_paths: list[Path],
+    config: dict[str, Any],
+    titles: list[str] | None = None,
+    dry_run: bool = False,
+) -> list[dict]:
+    """
+    Ingest local file(s), then run Whisper + ranking only on those videos
+    (no download, no YouTube queries).
+    """
+    videos = run_ingest(
+        video_paths=video_paths,
+        config=config,
+        titles=titles,
+        dry_run=dry_run,
+    )
+    if not videos or dry_run:
+        return []
+    only_ids = {v.video_id for v in videos}
+    return run_whisper_rank(config, dry_run=False, video_ids=only_ids)
+
+
 def run_whisper_rank(
     config: dict[str, Any],
     dry_run: bool = False,
+    video_ids: set[str] | None = None,
 ) -> list[dict]:
     """
     Get segments from Whisper API per video, score each with multi-signal
@@ -251,6 +274,7 @@ def run_whisper_rank(
     Extract all segments to data/candidates/<video_id>/, write manifests.
     Take top N by fused score; copy to data/candidates_ranked/.
     Optionally export vertical (9:16) crops to data/outputs/.
+    If video_ids is set, only those manifest stems are processed (e.g. splice uploads).
     """
     require_ffmpeg()
     ensure_data_dirs()
@@ -271,8 +295,10 @@ def run_whisper_rank(
     manifests_candidates_dir().mkdir(parents=True, exist_ok=True)
     all_segments: list[dict] = []
 
-    for mpath in manifests_videos_dir().glob("*.json"):
+    for mpath in sorted(manifests_videos_dir().glob("*.json")):
         video_id = mpath.stem
+        if video_ids is not None and video_id not in video_ids:
+            continue
         video_path = _resolve_video_path(video_id)
         if not video_path:
             logger.warning("No video file for %s, skipping", video_id)
