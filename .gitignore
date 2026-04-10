@@ -29,6 +29,9 @@ venv/
 ENV/
 env/
 
+# Claude (Claude Code / local assistant state)
+.claude/
+
 # IDE
 .idea/
 .vscode/

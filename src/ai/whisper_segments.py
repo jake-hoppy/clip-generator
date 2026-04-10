@@ -186,7 +186,7 @@ def _merge_segments_mlx(
     if not segments:
         return []
 
-    SILENCE_CUT_THRESHOLD = 0.4
+    SILENCE_CUT_THRESHOLD = 0.8
 
     def _snap_end(t: float) -> float:
         return _snap_to_scene(t, scene_boundaries) if scene_boundaries else t
