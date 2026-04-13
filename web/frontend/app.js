@@ -174,7 +174,7 @@ async function refreshDashboard() {
         <div class="empty-state" style="grid-column:1/-1">
           <div class="icon">🎬</div>
           <div class="title">No clips yet</div>
-          <div class="desc">Run the pipeline to generate clips</div>
+          <div class="desc">Use Clippify to generate clips</div>
         </div>`;
     } else {
       clips.forEach((c, i) => grid.appendChild(renderClipCard(c, i)));
@@ -219,7 +219,7 @@ async function startPipeline(command) {
     const statusRes = await fetch(`${API}/api/run/status`);
     const st = await statusRes.json();
     if (st.running) {
-      alert('Pipeline is already running.');
+      alert('Clippify is already running.');
       return;
     }
 
@@ -240,7 +240,7 @@ async function startPipeline(command) {
       body: JSON.stringify(body),
     });
     if (res.status === 409) {
-      alert('Pipeline already running.');
+      alert('Clippify is already running.');
       return;
     }
     if (!res.ok) {
@@ -252,7 +252,7 @@ async function startPipeline(command) {
     document.getElementById('stop-btn').style.display = 'inline-flex';
     document.getElementById('run-spinner').style.display = 'block';
     document.getElementById('run-status-badge').innerHTML =
-      '<span class="badge badge-amber">Running…</span>';
+      '<span class="badge badge-amber">Clippifying…</span>';
 
     if (runPollInterval) clearInterval(runPollInterval);
     runPollInterval = setInterval(async () => {
@@ -341,7 +341,7 @@ async function loadOutputs() {
         <div class="empty-state" style="grid-column:1/-1">
           <div class="icon">📁</div>
           <div class="title">No outputs yet</div>
-          <div class="desc">Run the pipeline with export_vertical: true to generate clips</div>
+          <div class="desc">Clippify with export_vertical enabled in Config to generate clips here</div>
         </div>`;
       return;
     }
@@ -570,13 +570,13 @@ async function pollPipelineUntilDone(pipelineStartMs, onUpdate) {
     }
     await new Promise((r) => setTimeout(r, 1000));
   }
-  throw new Error('Timed out waiting for pipeline');
+  throw new Error('Timed out waiting for Clippify');
 }
 
-// Pipeline stages for the ingest hero progress visualization
+// Progress stages for the Clippify (upload) hero
 const PIPELINE_STAGES = [
   { key: 'uploading',    label: 'Upload',     pct: 0  },
-  { key: 'ingesting',    label: 'Ingest',     pct: 18 },
+  { key: 'ingesting',    label: 'Prepare',    pct: 18 },
   { key: 'transcribing', label: 'Transcribe', pct: 40 },
   { key: 'scoring',      label: 'Score',      pct: 65 },
   { key: 'exporting',    label: 'Export',     pct: 85 },
@@ -621,12 +621,12 @@ function updateProgressUI(stageName, pct) {
 
   const names = {
     uploading:    'Uploading file...',
-    ingesting:    'Registering video...',
+    ingesting:    'Preparing video...',
     transcribing: 'Transcribing with Whisper...',
     scoring:      'Scoring segments...',
     exporting:    'Exporting vertical clips...',
     done:         'Complete!',
-    starting:     'Starting pipeline...',
+    starting:     'Starting Clippify...',
     failed:       'Failed',
   };
   if (stageNameEl) stageNameEl.textContent = names[stageName] || stageName;
@@ -663,7 +663,7 @@ function startIngestPolling() {
           clearInterval(_ingestPollInterval);
           _ingestPollInterval = null;
           document.getElementById('ingest-status').innerHTML =
-            '<span style="color:var(--red)">Pipeline failed. Check Run pipeline for log.</span>';
+            '<span style="color:var(--red)">Clippify failed. Check <strong>Clippify batch</strong> for the log.</span>';
           setTimeout(resetIngestUI, 3000);
         }
       }
@@ -721,7 +721,7 @@ function submitIngest() {
   xhr.onload = function () {
     if (xhr.status >= 200 && xhr.status < 300) {
       updateProgressUI('ingesting', 18);
-      document.getElementById('ingest-status').textContent = 'Upload complete. Pipeline running...';
+      document.getElementById('ingest-status').textContent = 'Upload complete. Clippifying...';
       startIngestPolling();
     } else {
       let msg = xhr.statusText;
@@ -860,7 +860,7 @@ function renderLibraryClips() {
         <div class="icon">🎞️</div>
         <div class="title">${search ? 'No matching clips' : 'No ranked clips yet'}</div>
         <div class="desc">${
-          search ? 'Try another search' : 'Run ingest + rank or the pipeline to populate the top ranked manifest'
+          search ? 'Try another search' : 'Clippify a video to populate the top ranked manifest'
         }</div>
       </div>`;
     return;
@@ -909,7 +909,7 @@ function renderLibrary() {
             ? 'Try a different search term'
             : _libFilter !== 'all'
             ? 'No videos with this status'
-            : 'Ingest a video to start your library'
+            : 'Clippify a video to start your library'
         }</div>
       </div>`;
     return;
@@ -946,7 +946,7 @@ function renderLibCard(v) {
 
   const rankBtn =
     v.status === 'ingested'
-      ? `<button class="btn btn-sm btn-primary" onclick="rankVideo('${escapeHtml(v.video_id)}')">▶ Rank now</button>`
+      ? `<button class="btn btn-sm btn-primary" onclick="rankVideo('${escapeHtml(v.video_id)}')">▶ Clippify now</button>`
       : '';
 
   const card = document.createElement('div');
@@ -977,7 +977,7 @@ async function rankVideo(videoId) {
     const stRes = await fetch(`${API}/api/run/status`);
     const st = await stRes.json();
     if (st.running) {
-      alert('Pipeline is already running. Wait for it to finish first.');
+      alert('Clippify is already running. Wait for it to finish first.');
       return;
     }
   } catch (e) { /* continue */ }
@@ -991,12 +991,12 @@ async function rankVideo(videoId) {
   if (res && res.ok) {
     navigate('run');
   } else {
-    alert('Failed to start ranking. Check the Run pipeline page.');
+    alert('Failed to start ranking. Check Clippify batch for the log.');
   }
 }
 
 async function clearIngested() {
-  if (!confirm('Remove all ingested video records? This only clears the manifest list — source files and outputs are untouched.')) return;
+  if (!confirm('Remove all uploaded video records from the list? This only clears the manifest list — source files and outputs are untouched.')) return;
   try {
     await fetch(`${API}/api/ingested`, { method: 'DELETE' });
     loadIngested();
@@ -1013,7 +1013,7 @@ async function loadIngested() {
     const data = await res.json();
     const locals = (data.videos || []).filter((v) => v.local);
     if (!locals.length) {
-      el.innerHTML = '<div style="color:var(--text-dim);font-size:13px;text-align:center;padding:1.5rem 0">No videos ingested yet</div>';
+      el.innerHTML = '<div style="color:var(--text-dim);font-size:13px;text-align:center;padding:1.5rem 0">No uploads yet</div>';
       return;
     }
     el.innerHTML = locals.map((v) => `
@@ -1173,7 +1173,7 @@ async function submitSplice() {
     const stRes = await fetch(`${API}/api/run/status`);
     const st = await stRes.json();
     if (st.running) {
-      statusEl.innerHTML = '<span style="color:var(--amber)">Pipeline is already running.</span>';
+      statusEl.innerHTML = '<span style="color:var(--amber)">Clippify is already running.</span>';
       return;
     }
   } catch (e) {
@@ -1192,7 +1192,7 @@ async function submitSplice() {
       setProgressUI('splice', uploadBarPercent(ratio), 'Uploading…');
     });
     const pipelineStartMs = Date.now();
-    setProgressUI('splice', 15, 'Starting pipeline…');
+    setProgressUI('splice', 15, 'Starting Clippify…');
     const fin = await pollPipelineUntilDone(pipelineStartMs, (data, elapsed) => {
       const pct = serverToBarPercent(data.percent, data.label, elapsed);
       setProgressUI('splice', pct, data.label || 'Working…');
@@ -1201,11 +1201,11 @@ async function submitSplice() {
       setProgressUI('splice', 100, 'Complete');
       loadOutputs();
       statusEl.innerHTML =
-        '<span style="color:var(--green)">Splice finished — open Ingest video to see clips below the upload.</span>';
+        '<span style="color:var(--green)">Done — open <strong>Clippify</strong> to see clips below the upload.</span>';
     } else {
       setProgressUI('splice', Math.min(fin.percent || 99, 99), 'Failed');
       statusEl.innerHTML =
-        '<span style="color:var(--red)">Pipeline failed. Check Run pipeline for the log.</span>';
+        '<span style="color:var(--red)">Clippify failed. Check <strong>Clippify batch</strong> for the log.</span>';
     }
   } catch (e) {
     console.error(e);

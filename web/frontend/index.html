@@ -22,18 +22,18 @@
   </div>
   <div class="nav-item" data-page="ingest">
     <svg viewBox="0 0 16 16" fill="currentColor"><path d="M8 1v9M4 6l4-4 4 4M2 13h12v2H2z"/></svg>
-    Ingest video
+    Clippify
   </div>
   <div class="nav-item" data-page="library">
     <svg viewBox="0 0 16 16" fill="currentColor"><path d="M2 2h3v12H2zm4 0h3v12H6zm4 0h4v12h-4z"/></svg>
     Library
   </div>
 
-  <!-- SECONDARY — YouTube pipeline, de-emphasized -->
-  <div class="nav-section secondary">youtube pipeline</div>
+  <!-- SECONDARY — batch Clippify (YouTube, multi-file, logs) -->
+  <div class="nav-section secondary">batch</div>
   <div class="nav-item secondary" data-page="run">
     <svg viewBox="0 0 16 16" fill="currentColor"><path d="M4 2l10 6-10 6z"/></svg>
-    Run pipeline
+    Clippify batch
   </div>
   <div class="nav-item secondary" data-page="splice">
     <svg viewBox="0 0 16 16" fill="currentColor"><path d="M3 3h10v10H3zm2 2v6h6V5zm8-2h2v12H11z"/></svg>
@@ -52,7 +52,7 @@
   </div>
 
   <div class="sidebar-footer">
-    <div class="label">last run</div>
+    <div class="label">last clippify</div>
     <div class="value" id="last-run-time">—</div>
     <div class="label" style="margin-top:4px" id="last-run-clips"></div>
   </div>
@@ -66,14 +66,10 @@
       <h1 class="page-title">Dashboard</h1>
       <div class="page-header-actions">
         <button type="button" class="btn" onclick="refreshDashboard()">↺ Refresh</button>
-        <button type="button" class="btn btn-primary" onclick="navigate('ingest')">↑ Ingest video</button>
+        <button type="button" class="btn btn-primary" onclick="navigate('ingest')">↑ Clippify</button>
         <span class="page-header-actions-spacer" aria-hidden="true"></span>
-        <button type="button" class="btn btn-icon" onclick="navigate('library')" title="Library" aria-label="Open library">
-          <svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M2 2h3v12H2zm4 0h3v12H6zm4 0h4v12h-4z"/></svg>
-        </button>
-        <button type="button" class="btn btn-icon" onclick="navigate('config')" title="Configuration" aria-label="Open configuration">
-          <svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M9.405 1.05c-.413-1.4-2.397-1.4-2.81 0l-.1.34a1.464 1.464 0 0 1-2.105.872l-.31-.17c-1.283-.698-2.686.705-1.987 1.987l.169.311c.446.82.023 1.841-.872 2.105l-.34.1c-1.4.413-1.4 2.397 0 2.81l.34.1a1.464 1.464 0 0 1 .872 2.105l-.17.31c-.698 1.283.705 2.686 1.987 1.987l.311-.169a1.464 1.464 0 0 1 2.105.872l.1.34c.413 1.4 2.397 1.4 2.81 0l.1-.34a1.464 1.464 0 0 1 2.105-.872l.31.17c1.283.698 2.686-.705 1.987-1.987l-.169-.311a1.464 1.464 0 0 1 .872-2.105l.34-.1c1.4-.413 1.4-2.397 0-2.81l-.34-.1a1.464 1.464 0 0 1-.872-2.105l.17-.31c.698-1.283-.705-2.686-1.987-1.987l-.311.169a1.464 1.464 0 0 1-2.105-.872l-.1-.34zM8 10.93a2.929 2.929 0 1 1 0-5.86 2.929 2.929 0 0 1 0 5.858z"/></svg>
-        </button>
+        <button type="button" class="btn btn-sm" onclick="navigate('library')">Library</button>
+        <button type="button" class="btn btn-sm" onclick="navigate('config')">Config</button>
       </div>
     </div>
 
@@ -105,13 +101,13 @@
       <div class="empty-state" style="grid-column:1/-1">
         <div class="icon">🎬</div>
         <div class="title">No clips yet</div>
-        <div class="desc">Run the pipeline to generate clips</div>
+        <div class="desc">Use Clippify to generate clips</div>
       </div>
     </div>
 
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:1rem">
       <div class="card">
-        <div class="section-title">Pipeline status</div>
+        <div class="section-title">Clippify status</div>
         <table class="status-table">
           <tr><td><span class="dot" id="dot-whisper"></span>Whisper model</td><td id="status-whisper">—</td></tr>
           <tr><td><span class="dot" id="dot-scene"></span>Scene detection</td><td id="status-scene">—</td></tr>
@@ -130,19 +126,19 @@
     </div>
   </div>
 
-  <!-- Run pipeline -->
+  <!-- Clippify batch (YouTube + logs) -->
   <div class="page" id="page-run">
     <div class="page-header">
-      <h1 class="page-title">Run pipeline</h1>
+      <h1 class="page-title">Clippify batch</h1>
       <div id="run-status-badge"></div>
     </div>
 
     <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:14px;margin-bottom:2rem">
       <div class="card">
         <div style="font-size:24px;margin-bottom:0.5rem">🚀</div>
-        <div style="font-weight:600;margin-bottom:0.5rem">Full run</div>
+        <div style="font-weight:600;margin-bottom:0.5rem">Full Clippify</div>
         <div style="font-size:12px;color:var(--text-muted);margin-bottom:1rem">Download new videos, transcribe, score, and export top clips</div>
-        <button class="btn btn-primary" style="width:100%" onclick="startPipeline('run')">Start full run</button>
+        <button class="btn btn-primary" style="width:100%" onclick="startPipeline('run')">Start full Clippify</button>
       </div>
       <div class="card">
         <div style="font-size:24px;margin-bottom:0.5rem">⚡</div>
@@ -168,16 +164,16 @@
         <div class="form-group" style="padding-bottom:1rem">
           <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
             <label style="display:flex;align-items:center;gap:8px;cursor:pointer;margin:0">
-              <input type="checkbox" id="opt-dryrun"> Dry run (no files written)
+              <input type="checkbox" id="opt-dryrun"> Dry Clippify (no files written)
             </label>
             <span class="info-hint" tabindex="0">
               <span class="info-icon" aria-hidden="true">i</span>
-              <span class="info-tooltip" role="tooltip">Runs the chosen command without writing clips, manifests, or downloads. Useful to validate config and see log output only.</span>
+              <span class="info-tooltip" role="tooltip">Executes the chosen action without writing clips, manifests, or downloads. Useful to validate config and see log output only.</span>
             </span>
           </div>
         </div>
       </div>
-      <button class="btn" onclick="stopPipeline()" id="stop-btn" style="display:none;color:var(--red);border-color:var(--red)">■ Stop pipeline</button>
+      <button class="btn" onclick="stopPipeline()" id="stop-btn" style="display:none;color:var(--red);border-color:var(--red)">■ Stop Clippify</button>
     </div>
 
     <div class="card">
@@ -188,15 +184,15 @@
           <button class="btn btn-sm" onclick="refreshLog()">↺ Refresh</button>
         </div>
       </div>
-      <div class="log-box" id="run-log-box">Waiting for pipeline...</div>
+      <div class="log-box" id="run-log-box">Waiting for Clippify…</div>
     </div>
   </div>
 
-  <!-- Ingest — CENTER STAGE -->
+  <!-- Clippify (single upload) -->
   <div class="page" id="page-ingest">
     <div class="page-header">
-      <h1 class="page-title">Ingest video</h1>
-      <span style="font-size:13px;color:var(--text-muted)">Upload an MP4 to transcribe, score, and clip</span>
+      <h1 class="page-title">Clippify</h1>
+      <span style="font-size:13px;color:var(--text-muted)">Upload a video — we transcribe, score, and cut it into clips</span>
     </div>
 
     <div class="ingest-hero">
@@ -226,7 +222,7 @@
 
         <div class="ingest-actions">
           <button class="btn btn-primary" id="ingest-btn" onclick="submitIngest()">
-            ▶ Ingest + rank this video
+            ▶ Clippify this video
           </button>
           <button class="btn" onclick="clearFileSelection()">Cancel</button>
         </div>
@@ -251,9 +247,9 @@
       <!-- Divider -->
       <hr style="margin:2rem 0">
 
-      <!-- Recent ingests -->
+      <!-- Recent uploads -->
       <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:1rem">
-        <div class="section-title" style="margin-bottom:0">Recent ingests</div>
+        <div class="section-title" style="margin-bottom:0">Recent uploads</div>
         <button class="btn btn-sm btn-danger" onclick="clearIngested()">🗑 Clear</button>
       </div>
       <div id="ingested-list">
@@ -267,7 +263,7 @@
       <div class="ingest-clips-head">
         <div>
           <div class="section-title" style="margin-bottom:4px">Your clips</div>
-          <div style="font-size:12px;color:var(--text-muted)">Exported MP4s from the latest run appear here</div>
+          <div style="font-size:12px;color:var(--text-muted)">Exported MP4s from your latest Clippify appear here</div>
         </div>
         <div style="display:flex;align-items:center;gap:10px">
           <span style="font-size:13px;color:var(--text-muted)" id="output-count"></span>
@@ -278,7 +274,7 @@
         <div class="empty-state" style="grid-column:1/-1">
           <div class="icon">📁</div>
           <div class="title">No clips yet</div>
-          <div class="desc">After ingest finishes, vertical exports show up here (enable Vertical export in Config)</div>
+          <div class="desc">When Clippify finishes, vertical exports show up here (enable Vertical export in Config)</div>
         </div>
       </div>
     </section>
@@ -317,7 +313,7 @@
         <div class="lib-empty">
           <div class="icon">📚</div>
           <div class="title">No videos yet</div>
-          <div class="desc">Ingest a video to start building your library</div>
+          <div class="desc">Clippify a video to start building your library</div>
         </div>
       </div>
     </div>
@@ -338,7 +334,7 @@
         <div class="empty-state" style="grid-column:1/-1">
           <div class="icon">🎞️</div>
           <div class="title">No clips yet</div>
-          <div class="desc">Run ingest + rank to populate ranked clips</div>
+          <div class="desc">Clippify a video to populate ranked clips</div>
         </div>
       </div>
     </div>
@@ -350,10 +346,10 @@
       <h1 class="page-title">Splice uploads</h1>
     </div>
     <div class="card" style="max-width:640px">
-      <div class="section-title">Run pipeline on your files only</div>
+      <div class="section-title">Clippify uploads only</div>
       <p style="font-size:13px;color:var(--text-muted);margin-bottom:1rem;line-height:1.5">
-        Add one or more video files, then submit. This ingests them and runs Whisper + scoring
-        <strong>only on these uploads</strong> — no YouTube download and no search queries.
+        Add one or more video files, then submit. Clippify runs Whisper + scoring
+        <strong>only on these files</strong> — no YouTube download and no search queries.
       </p>
       <div class="form-group">
         <label>Videos</label>
@@ -361,7 +357,7 @@
       </div>
       <div id="splice-file-list" class="splice-file-list"></div>
       <button type="button" class="btn btn-primary" style="margin-top:0.75rem" onclick="submitSplice()" id="splice-submit">
-        Run splice on uploads
+        Clippify these uploads
       </button>
       <div id="splice-progress-wrap" class="progress-wrap" style="display:none;margin-top:1rem">
         <div class="progress-bar"><div class="progress-fill" id="splice-progress-fill"></div></div>
@@ -480,7 +476,7 @@
               <span class="toggle-label">Scoring: audio</span>
               <span class="info-hint" tabindex="0">
                 <span class="info-icon" aria-hidden="true">i</span>
-                <span class="info-tooltip" role="tooltip">Runs local librosa-style energy analysis on the segment’s audio. No extra API cost. If disabled, audio does not contribute to the blended score.</span>
+                <span class="info-tooltip" role="tooltip">Performs local librosa-style energy analysis on the segment’s audio. No extra API cost. If disabled, audio does not contribute to the blended score.</span>
               </span>
             </span>
             <input type="checkbox" id="cfg-scoring-audio">
