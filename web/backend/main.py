@@ -1,5 +1,6 @@
 """
-clip-farm Web API — wraps the pipeline via subprocess only (never imports src/).
+ClipGen Web API — wraps the pipeline via subprocess only (never imports src/).
+YouTube upload is the one exception — it imports src/youtube/upload directly.
 """
 from __future__ import annotations
 
@@ -19,7 +20,7 @@ from fastapi.staticfiles import StaticFiles
 
 from web.backend.progress import estimate_progress_from_log, read_log_tail
 
-app = FastAPI(title="clip-farm API")
+app = FastAPI(title="ClipGen API")
 
 app.add_middleware(
     CORSMiddleware,
@@ -39,11 +40,10 @@ RANKED_MANIFEST = DATA_ROOT / "manifests" / "candidates_ranked" / "top_ranked_ma
 USED_CLIPS_FILE = DATA_ROOT / "registry" / "used_clips.json"
 PROCESSED_VIDEOS_FILE = DATA_ROOT / "registry" / "processed_videos.json"
 INCOMING_DIR = DATA_ROOT / "videos" / "incoming"
-
 FRONTEND_DIR = Path(__file__).resolve().parent.parent / "frontend"
 
 _processes: dict[str, subprocess.Popen] = {}
-_process_status: dict[str, str] = {}  # "running" | "done" | "failed"
+_process_status: dict[str, str] = {}
 
 
 def _python() -> str:
@@ -62,6 +62,32 @@ def clip_id_from_output_filename(name: str) -> str:
     parts = stem.split("_", 2)
     return parts[2] if len(parts) >= 3 else stem
 
+
+def video_id_from_clip_id(clip_id: str) -> str:
+    if "_t" in clip_id:
+        return clip_id.split("_t", 1)[0]
+    return ""
+
+
+def _parse_top_n_override(raw: str) -> int | None:
+    if not raw or not str(raw).strip():
+        return None
+    try:
+        n = int(str(raw).strip())
+    except ValueError:
+        return None
+    if n < 1 or n > 500:
+        return None
+    return n
+
+
+def datetime_iso(ts: float) -> str:
+    return datetime.fromtimestamp(ts, tz=timezone.utc).isoformat()
+
+
+# ============================================================
+# Core API
+# ============================================================
 
 @app.get("/")
 def root():
@@ -86,30 +112,15 @@ def api_stats():
         except Exception:
             pass
 
-    exhausted_videos = 0
-    if PROCESSED_VIDEOS_FILE.exists():
-        try:
-            with open(PROCESSED_VIDEOS_FILE) as f:
-                pv = json.load(f).get("processed_videos", {})
-            exhausted_videos = sum(1 for v in pv.values() if v >= 2)
-        except Exception:
-            pass
-
     avg_score = 0.0
-    clips = []
     if RANKED_MANIFEST.exists():
         try:
             with open(RANKED_MANIFEST) as f:
-                data = json.load(f)
-            clips = data.get("clips", [])
+                clips = json.load(f).get("clips", [])
             if clips:
                 avg_score = round(sum(c.get("score", 0) for c in clips) / len(clips), 1)
         except Exception:
             pass
-
-    last_run = None
-    if LOG_PATH.exists():
-        last_run = datetime_iso(LOG_PATH.stat().st_mtime)
 
     pipeline_running = False
     proc = _processes.get("main")
@@ -120,15 +131,9 @@ def api_stats():
         "outputs_count": outputs_count,
         "videos_count": videos_count,
         "used_clips": used_clips,
-        "exhausted_videos": exhausted_videos,
         "avg_score": avg_score,
-        "last_run": last_run,
         "pipeline_running": pipeline_running,
     }
-
-
-def datetime_iso(ts: float) -> str:
-    return datetime.fromtimestamp(ts, tz=timezone.utc).isoformat()
 
 
 @app.get("/api/clips")
@@ -145,7 +150,7 @@ def api_clips():
 
 
 @app.get("/api/outputs")
-def api_outputs():
+def api_outputs(video_id: str | None = None):
     manifest_by_id: dict[str, dict] = {}
     if RANKED_MANIFEST.exists():
         try:
@@ -164,19 +169,22 @@ def api_outputs():
 
     for p in sorted(OUTPUTS_DIR.glob("*.mp4"), key=lambda x: x.stat().st_mtime, reverse=True):
         cid = clip_id_from_output_filename(p.name)
+        if video_id and not cid.startswith(f"{video_id}_t"):
+            continue
         meta = manifest_by_id.get(cid, {})
         st = p.stat()
-        out.append(
-            {
-                "filename": p.name,
-                "clip_id": cid,
-                "size_mb": round(st.st_size / 1024 / 1024, 2),
-                "created": datetime_iso(st.st_mtime),
-                "score": meta.get("score"),
-                "text": meta.get("text", ""),
-                "duration": meta.get("duration_seconds"),
-            }
-        )
+        vid = video_id_from_clip_id(cid)
+        out.append({
+            "filename": p.name,
+            "clip_id": cid,
+            "video_id": vid,
+            "size_mb": round(st.st_size / 1024 / 1024, 2),
+            "created": datetime_iso(st.st_mtime),
+            "score": meta.get("score"),
+            "text": meta.get("text", ""),
+            "duration": meta.get("duration_seconds"),
+            "duration_seconds": meta.get("duration_seconds"),
+        })
     return {"clips": out}
 
 
@@ -186,11 +194,7 @@ def api_output_video(filename: str):
     path = OUTPUTS_DIR / safe
     if not path.is_file():
         raise HTTPException(status_code=404, detail="File not found")
-    return FileResponse(
-        path,
-        media_type="video/mp4",
-        filename=safe,
-    )
+    return FileResponse(path, media_type="video/mp4", filename=safe)
 
 
 @app.get("/api/config")
@@ -217,10 +221,14 @@ def api_log():
         return PlainTextResponse("")
     try:
         lines = LOG_PATH.read_text(errors="replace").splitlines()
-        return PlainTextResponse("\n".join(lines[-60:]))
+        return PlainTextResponse("\n".join(lines[-80:]))
     except Exception:
         return PlainTextResponse("")
 
+
+# ============================================================
+# Pipeline control
+# ============================================================
 
 @app.post("/api/run")
 def api_run(body: dict[str, Any] = Body(...)):
@@ -245,12 +253,7 @@ def api_run(body: dict[str, Any] = Body(...)):
     LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
     log_f = open(LOG_PATH, "a", encoding="utf-8")
     try:
-        p = subprocess.Popen(
-            cmd,
-            cwd=str(PIPELINE_ROOT),
-            stdout=log_f,
-            stderr=subprocess.STDOUT,
-        )
+        p = subprocess.Popen(cmd, cwd=str(PIPELINE_ROOT), stdout=log_f, stderr=subprocess.STDOUT)
     except Exception as e:
         log_f.close()
         raise HTTPException(status_code=500, detail=str(e)) from e
@@ -265,25 +268,15 @@ def api_run_status():
     proc = _processes.get("main")
     if proc is None:
         return {"running": False, "pid": None, "exit_code": None}
-
     code = proc.poll()
     if code is None:
         return {"running": True, "pid": proc.pid, "exit_code": None}
-
-    if code == 0:
-        _process_status["main"] = "done"
-    else:
-        _process_status["main"] = "failed"
-
     return {"running": False, "pid": proc.pid, "exit_code": code}
 
 
 @app.get("/api/run/stages")
 def api_run_stages():
-    """
-    Parse the log file to detect which pipeline stage is currently running.
-    Returns current stage name and estimated progress 0-100.
-    """
+    """Detect which pipeline stage is running from log keywords."""
     if not LOG_PATH.exists():
         return {"stage": "idle", "progress": 0, "running": False}
 
@@ -331,10 +324,6 @@ def api_run_stages():
 
 @app.get("/api/run/progress")
 def api_run_progress():
-    """
-    Heuristic progress from run.log (0–100%) plus running/exit state.
-    Upload progress is tracked client-side before the subprocess starts.
-    """
     proc = _processes.get("main")
     running = proc is not None and proc.poll() is None
     exit_code: int | None = None
@@ -348,32 +337,12 @@ def api_run_progress():
 
     if not running:
         if proc is None:
-            return {
-                "running": False,
-                "percent": 0.0,
-                "label": "Idle",
-                "exit_code": None,
-            }
+            return {"running": False, "percent": 0.0, "label": "Idle", "exit_code": None}
         if exit_code == 0:
-            return {
-                "running": False,
-                "percent": 100.0,
-                "label": "Complete",
-                "exit_code": 0,
-            }
-        return {
-            "running": False,
-            "percent": min(pct, 99.0),
-            "label": "Failed",
-            "exit_code": exit_code,
-        }
+            return {"running": False, "percent": 100.0, "label": "Complete", "exit_code": 0}
+        return {"running": False, "percent": min(pct, 99.0), "label": "Failed", "exit_code": exit_code}
 
-    return {
-        "running": True,
-        "percent": min(pct, 98.0),
-        "label": label,
-        "exit_code": None,
-    }
+    return {"running": True, "percent": min(pct, 98.0), "label": label, "exit_code": None}
 
 
 @app.post("/api/run/stop")
@@ -388,14 +357,19 @@ def api_run_stop():
     return {"stopped": True}
 
 
-MAX_UPLOAD_BYTES = 2 * 1024 * 1024 * 1024  # 2 GB hard ceiling
-CHUNK_SIZE = 1024 * 1024  # 1 MB read chunks
+# ============================================================
+# Upload / ingest
+# ============================================================
+
+MAX_UPLOAD_BYTES = 2 * 1024 * 1024 * 1024  # 2 GB
+CHUNK_SIZE = 1024 * 1024  # 1 MB
 
 
 @app.post("/api/ingest")
 async def api_ingest(
     file: UploadFile = File(...),
     title: str = Form(""),
+    top_n: str = Form(""),
 ):
     if not file.filename:
         raise HTTPException(status_code=400, detail="No filename")
@@ -427,17 +401,16 @@ async def api_ingest(
     cmd = [_python(), "-m", "src.main", "ingest", str(dest), "--rank"]
     if title.strip():
         cmd.extend(["--title", title.strip()])
+    tn = _parse_top_n_override(top_n)
+    if tn is not None:
+        cmd.extend(["--top-n", str(tn)])
 
     LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
     log_f = open(LOG_PATH, "a", encoding="utf-8")
     try:
-        p = subprocess.Popen(
-            cmd,
-            cwd=str(PIPELINE_ROOT),
-            stdout=log_f,
-            stderr=subprocess.STDOUT,
-        )
+        p = subprocess.Popen(cmd, cwd=str(PIPELINE_ROOT), stdout=log_f, stderr=subprocess.STDOUT)
         _processes["main"] = p
+        _process_status["main"] = "running"
     except Exception as e:
         log_f.close()
         raise HTTPException(status_code=500, detail=str(e)) from e
@@ -445,78 +418,18 @@ async def api_ingest(
     return {"started": True, "filename": file.filename, "size_bytes": total}
 
 
-@app.post("/api/splice")
-async def api_splice(files: list[UploadFile] = File(...)):
-    """
-    Save uploaded videos and run `splice`: ingest + rank on those files only
-    (no download, no YouTube queries).
-    """
-    if not files:
-        raise HTTPException(status_code=400, detail="No files uploaded")
-
-    proc = _processes.get("main")
-    if proc is not None and proc.poll() is None:
-        raise HTTPException(status_code=409, detail="Pipeline already running")
-
-    paths: list[str] = []
-    INCOMING_DIR.mkdir(parents=True, exist_ok=True)
-    try:
-        for uf in files:
-            if not uf.filename:
-                continue
-            safe = _safe_filename(uf.filename)
-            dest = INCOMING_DIR / f"splice_{uuid.uuid4().hex[:12]}_{safe}"
-            total = 0
-            with open(dest, "wb") as out_f:
-                while True:
-                    chunk = await uf.read(CHUNK_SIZE)
-                    if not chunk:
-                        break
-                    total += len(chunk)
-                    if total > MAX_UPLOAD_BYTES:
-                        raise HTTPException(status_code=413, detail=f"{uf.filename} too large (2 GB max)")
-                    out_f.write(chunk)
-            paths.append(str(dest.resolve()))
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e)) from e
-
-    if not paths:
-        raise HTTPException(status_code=400, detail="No valid files")
-
-    cmd = [_python(), "-m", "src.main", "splice", *paths]
-
-    LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
-    log_f = open(LOG_PATH, "a", encoding="utf-8")
-    try:
-        p = subprocess.Popen(
-            cmd,
-            cwd=str(PIPELINE_ROOT),
-            stdout=log_f,
-            stderr=subprocess.STDOUT,
-        )
-    except Exception as e:
-        log_f.close()
-        raise HTTPException(status_code=500, detail=str(e)) from e
-
-    _processes["main"] = p
-    _process_status["main"] = "running"
-    return {"started": True, "files": len(paths), "pid": p.pid}
-
+# ============================================================
+# Library
+# ============================================================
 
 @app.get("/api/library")
 def api_library():
-    """
-    Return enriched video library — all ingested videos with status,
-    clip count, and candidate info. Filters out junk splice artifacts.
-    """
     if not MANIFESTS_VIDEOS.exists():
         return {"videos": []}
 
-    ranked_video_ids: set[str] = set()
-    clips_per_video: dict[str, int] = {}
     candidates_dir = DATA_ROOT / "manifests" / "candidates"
+    clips_per_video: dict[str, int] = {}
+    ranked_video_ids: set[str] = set()
     if candidates_dir.exists():
         for cp in candidates_dir.glob("*.json"):
             vid = cp.stem
@@ -538,26 +451,18 @@ def api_library():
             pass
 
     videos = []
-    for p in sorted(
-        MANIFESTS_VIDEOS.glob("*.json"),
-        key=lambda x: x.stat().st_mtime,
-        reverse=True,
-    ):
+    for p in sorted(MANIFESTS_VIDEOS.glob("*.json"), key=lambda x: x.stat().st_mtime, reverse=True):
         try:
             with open(p) as f:
                 d = json.load(f)
         except Exception:
             continue
 
-        title = d.get("title", "")
         duration = float(d.get("duration_seconds") or 0)
         if duration <= 0:
             continue
-        if title.lower().startswith("splice"):
-            continue
 
         vid = d.get("video_id", "")
-
         if vid in exhausted_ids:
             status = "exhausted"
         elif vid in ranked_video_ids:
@@ -567,7 +472,7 @@ def api_library():
 
         videos.append({
             "video_id": vid,
-            "title": title,
+            "title": d.get("title", ""),
             "duration_seconds": duration,
             "download_time": d.get("download_time"),
             "uploader": d.get("uploader", ""),
@@ -579,105 +484,74 @@ def api_library():
     return {"videos": videos, "total": len(videos)}
 
 
-@app.get("/api/videos")
-def api_videos():
-    if not MANIFESTS_VIDEOS.exists():
-        return {"videos": []}
+# ============================================================
+# YouTube integration
+# ============================================================
 
-    videos = []
-    for p in sorted(MANIFESTS_VIDEOS.glob("*.json")):
-        try:
-            with open(p) as f:
-                d = json.load(f)
-            videos.append(
-                {
-                    "video_id": d.get("video_id", ""),
-                    "title": d.get("title", ""),
-                    "duration_seconds": d.get("duration_seconds", 0),
-                    "uploader": d.get("uploader", ""),
-                    "local": d.get("uploader") == "local",
-                }
+@app.get("/api/youtube/status")
+def api_youtube_status():
+    try:
+        from src.youtube.upload import is_connected
+        connected, channel_name = is_connected()
+        return {"connected": connected, "channel_name": channel_name}
+    except ImportError:
+        return {"connected": False, "channel_name": "", "error": "Missing dependencies"}
+    except Exception as e:
+        return {"connected": False, "channel_name": "", "error": str(e)}
+
+
+@app.get("/api/youtube/auth-url")
+def api_youtube_auth_url():
+    try:
+        from src.youtube.upload import get_auth_url
+        url = get_auth_url()
+        if url:
+            return {"url": url}
+        return {"url": None, "error": "client_secrets.json not found in config/"}
+    except ImportError:
+        return {"url": None, "error": "Missing google-auth-oauthlib dependency"}
+    except Exception as e:
+        return {"url": None, "error": str(e)}
+
+
+@app.get("/api/youtube/callback")
+def api_youtube_callback(code: str = "", error: str = ""):
+    """OAuth2 callback — Google redirects here after user authorizes."""
+    if error:
+        return PlainTextResponse(f"Authorization failed: {error}\n\nYou can close this tab.")
+    if not code:
+        return PlainTextResponse("No authorization code received.\n\nYou can close this tab.")
+    try:
+        from src.youtube.upload import exchange_code
+        success = exchange_code(code=code)
+        if success:
+            return PlainTextResponse(
+                "YouTube connected successfully!\n\nYou can close this tab and return to ClipGen."
             )
-        except Exception:
-            pass
-    return {"videos": videos}
+        return PlainTextResponse("Failed to exchange authorization code.\n\nYou can close this tab.")
+    except Exception as e:
+        return PlainTextResponse(f"Error: {e}\n\nYou can close this tab.")
 
 
-@app.delete("/api/ingested")
-def api_delete_ingested():
-    """Remove all video manifests from manifests/videos/ (clears the ingested list)."""
-    deleted = 0
-    if MANIFESTS_VIDEOS.exists():
-        for p in MANIFESTS_VIDEOS.glob("*.json"):
-            try:
-                p.unlink()
-                deleted += 1
-            except Exception:
-                pass
-    return {"cleared": True, "deleted": deleted}
+@app.post("/api/youtube/upload-top")
+def api_youtube_upload_top():
+    """Upload the top 2 output clips to YouTube."""
+    try:
+        from src.youtube.upload import upload_top_clips
+        results = upload_top_clips(n=2, privacy="private")
+        urls = [r["url"] for r in results if "url" in r]
+        return {"uploaded": len(results), "results": results, "urls": urls}
+    except ImportError:
+        raise HTTPException(status_code=500, detail="Missing google-auth-oauthlib dependency")
+    except RuntimeError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.delete("/api/registry/used-clips")
-def api_delete_used_clips():
-    if USED_CLIPS_FILE.exists():
-        USED_CLIPS_FILE.unlink()
-    return {"cleared": True}
-
-
-@app.get("/api/registry")
-def api_registry():
-    used = 0
-    if USED_CLIPS_FILE.exists():
-        try:
-            with open(USED_CLIPS_FILE) as f:
-                used = len(json.load(f).get("used_clip_ids", []))
-        except Exception:
-            pass
-
-    processed: dict[str, int] = {}
-    if PROCESSED_VIDEOS_FILE.exists():
-        try:
-            with open(PROCESSED_VIDEOS_FILE) as f:
-                processed = json.load(f).get("processed_videos", {})
-        except Exception:
-            pass
-
-    exhausted = sum(1 for c in processed.values() if c >= 2)
-
-    titles: dict[str, str] = {}
-    if MANIFESTS_VIDEOS.exists():
-        for p in MANIFESTS_VIDEOS.glob("*.json"):
-            try:
-                with open(p) as f:
-                    d = json.load(f)
-                vid = d.get("video_id")
-                if vid:
-                    titles[vid] = d.get("title", vid)
-            except Exception:
-                pass
-
-    processed_list = []
-    for vid, count in processed.items():
-        processed_list.append(
-            {
-                "video_id": vid,
-                "title": titles.get(vid, vid),
-                "times_processed": count,
-                "exhausted": count >= 2,
-            }
-        )
-
-    return {
-        "used_clips": used,
-        "processed_videos_count": len(processed),
-        "exhausted_videos": exhausted,
-        "processed": processed_list,
-    }
-
+# ============================================================
+# Static frontend
+# ============================================================
 
 if FRONTEND_DIR.is_dir():
-    app.mount(
-        "/app",
-        StaticFiles(directory=str(FRONTEND_DIR), html=True),
-        name="frontend",
-    )
+    app.mount("/app", StaticFiles(directory=str(FRONTEND_DIR), html=True), name="frontend")

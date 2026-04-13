@@ -48,3 +48,5 @@ config/local*.yaml
 
 # Secrets (never commit)
 .env
+config/client_secrets.json
+config/youtube_token.json

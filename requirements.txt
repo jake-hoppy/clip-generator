@@ -13,8 +13,9 @@ soundfile>=0.12.0
 # Scene detection (PySceneDetect with OpenCV backend)
 scenedetect[opencv]>=0.6
 
-# YouTube Data API v3 (trending video discovery)
+# YouTube Data API v3 (trending video discovery + upload)
 google-api-python-client>=2.100.0
+google-auth-oauthlib>=1.0.0
 
 # Local Whisper via Apple MLX — uses Apple Silicon GPU natively (free, fast)
 mlx-whisper>=0.4.0

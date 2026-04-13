@@ -1,3 +1,4 @@
+auto_youtube_upload: false
 download_format: mp4
 download_quality: 480p
 export_vertical: true

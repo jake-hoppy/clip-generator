@@ -106,7 +106,12 @@ def cmd_ingest(args: argparse.Namespace, config: dict) -> None:
         except RuntimeError as e:
             print(f"Error: {e}", file=sys.stderr)
             return
-        clips = run_whisper_rank(config, dry_run=False)
+        clips = run_whisper_rank(
+            config,
+            dry_run=False,
+            video_ids={v.video_id for v in videos},
+            top_n=args.top_n,
+        )
         print("\n" + "=" * 60)
         print("RANK COMPLETE")
         print("=" * 60)
@@ -132,6 +137,7 @@ def cmd_splice(args: argparse.Namespace, config: dict) -> None:
         config=config,
         titles=titles,
         dry_run=args.dry_run,
+        top_n=args.top_n,
     )
     print("\n" + "=" * 60)
     print("SPLICE (ingest + rank on uploaded files only)")
@@ -227,6 +233,13 @@ def main() -> int:
         action="store_true",
         help="Automatically run the rank step after ingesting",
     )
+    p_ingest.add_argument(
+        "--top-n",
+        type=int,
+        default=None,
+        metavar="N",
+        help="With --rank, override config top_n_global for this run",
+    )
     p_ingest.add_argument("--dry-run", action="store_true", help="Do not write files")
     p_ingest.set_defaults(func=cmd_ingest)
 
@@ -245,6 +258,13 @@ def main() -> int:
         nargs="*",
         default=None,
         help="Optional title(s), one per file in order",
+    )
+    p_splice.add_argument(
+        "--top-n",
+        type=int,
+        default=None,
+        metavar="N",
+        help="Override config top_n_global for this rank",
     )
     p_splice.add_argument("--dry-run", action="store_true", help="Do not write files")
     p_splice.set_defaults(func=cmd_splice)

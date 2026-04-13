@@ -246,6 +246,7 @@ def run_splice(
     config: dict[str, Any],
     titles: list[str] | None = None,
     dry_run: bool = False,
+    top_n: int | None = None,
 ) -> list[dict]:
     """
     Ingest local file(s), then run Whisper + ranking only on those videos
@@ -260,13 +261,16 @@ def run_splice(
     if not videos or dry_run:
         return []
     only_ids = {v.video_id for v in videos}
-    return run_whisper_rank(config, dry_run=False, video_ids=only_ids)
+    return run_whisper_rank(
+        config, dry_run=False, video_ids=only_ids, top_n=top_n
+    )
 
 
 def run_whisper_rank(
     config: dict[str, Any],
     dry_run: bool = False,
     video_ids: set[str] | None = None,
+    top_n: int | None = None,
 ) -> list[dict]:
     """
     Get segments from Whisper API per video, score each with multi-signal
@@ -278,7 +282,7 @@ def run_whisper_rank(
     """
     require_ffmpeg()
     ensure_data_dirs()
-    top_n = int(config.get("top_n_global", 20))
+    limit_n = int(top_n if top_n is not None else config.get("top_n_global", 20))
     min_duration = float(config.get("segment_min_duration_seconds", 12.0))
     max_duration = float(config.get("segment_max_duration_seconds", 20.0))
     whisper_model = config.get("whisper_model", "whisper-1")
@@ -426,13 +430,18 @@ def run_whisper_rank(
             with open(manifest_path, "w", encoding="utf-8") as f:
                 json.dump(manifest_data, f, indent=2)
 
-    top = heapq.nlargest(top_n, all_segments, key=lambda s: s["score"])
+    top = heapq.nlargest(limit_n, all_segments, key=lambda s: s["score"])
     if not top:
         logger.info("No segments found")
         return []
 
     if dry_run:
-        logger.info("Would write candidates to %s, top %d to %s", candidates_dir(), len(top), candidates_ranked_dir())
+        logger.info(
+            "Would write candidates to %s, top %d to %s",
+            candidates_dir(),
+            len(top),
+            candidates_ranked_dir(),
+        )
         return top
 
     rank_dir = candidates_ranked_dir()
@@ -456,7 +465,7 @@ def run_whisper_rank(
     manifest_path = manifests_candidates_ranked_dir() / "top_ranked_manifest.json"
     manifests_candidates_ranked_dir().mkdir(parents=True, exist_ok=True)
     with open(manifest_path, "w", encoding="utf-8") as f:
-        json.dump({"top_n": top_n, "clips": manifest_list}, f, indent=2)
+        json.dump({"top_n": limit_n, "clips": manifest_list}, f, indent=2)
     logger.info("Wrote candidates to %s, top %d ranked to %s", candidates_dir(), len(manifest_list), rank_dir)
 
     # --- Vertical export (optional) ---

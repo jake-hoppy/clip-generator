@@ -3,580 +3,360 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>clip farm</title>
+  <title>ClipGen</title>
   <link rel="stylesheet" href="styles.css">
 </head>
 <body>
 
+<!-- Sidebar -->
 <nav class="sidebar">
   <div class="logo">
-    <div class="logo-icon">🎬</div>
-    clip farm
+    <div class="logo-icon">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+    </div>
+    <span>ClipGen</span>
   </div>
 
-  <!-- PRIMARY — dashboard home -->
-  <div class="nav-section">home</div>
-  <div class="nav-item active" data-page="dashboard">
-    <svg viewBox="0 0 16 16" fill="currentColor"><rect x="1" y="1" width="6" height="6" rx="1"/><rect x="9" y="1" width="6" height="6" rx="1"/><rect x="1" y="9" width="6" height="6" rx="1"/><rect x="9" y="9" width="6" height="6" rx="1"/></svg>
-    Dashboard
-  </div>
-  <div class="nav-item" data-page="ingest">
-    <svg viewBox="0 0 16 16" fill="currentColor"><path d="M8 1v9M4 6l4-4 4 4M2 13h12v2H2z"/></svg>
-    Clippify
-  </div>
-  <div class="nav-item" data-page="library">
-    <svg viewBox="0 0 16 16" fill="currentColor"><path d="M2 2h3v12H2zm4 0h3v12H6zm4 0h4v12h-4z"/></svg>
-    Library
-  </div>
-
-  <!-- SECONDARY — batch Clippify (YouTube, multi-file, logs) -->
-  <div class="nav-section secondary">batch</div>
-  <div class="nav-item secondary" data-page="run">
-    <svg viewBox="0 0 16 16" fill="currentColor"><path d="M4 2l10 6-10 6z"/></svg>
-    Clippify batch
-  </div>
-  <div class="nav-item secondary" data-page="splice">
-    <svg viewBox="0 0 16 16" fill="currentColor"><path d="M3 3h10v10H3zm2 2v6h6V5zm8-2h2v12H11z"/></svg>
-    Splice uploads
-  </div>
-  <div class="nav-item secondary" data-page="config">
-    <svg viewBox="0 0 16 16" fill="currentColor"><path d="M8 5a3 3 0 100 6 3 3 0 000-6zM1 8a7 7 0 1114 0A7 7 0 011 8z"/></svg>
-    Config
+  <div class="nav-group">
+    <a class="nav-item active" data-page="upload">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+      Upload
+    </a>
+    <a class="nav-item" data-page="library">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="2" width="20" height="20" rx="2"/><line x1="2" y1="10" x2="22" y2="10"/><line x1="10" y1="2" x2="10" y2="22"/></svg>
+      Library
+    </a>
+    <a class="nav-item" data-page="settings">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 012.83-2.83l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z"/></svg>
+      Settings
+    </a>
   </div>
 
-  <!-- UTILITY -->
-  <div class="nav-section secondary">manage</div>
-  <div class="nav-item secondary" data-page="registry">
-    <svg viewBox="0 0 16 16" fill="currentColor"><path d="M1 3h14v2H1zm2 4h10v2H3zm2 4h6v2H5z"/></svg>
-    Registry
-  </div>
-
-  <div class="sidebar-footer">
-    <div class="label">last clippify</div>
-    <div class="value" id="last-run-time">—</div>
-    <div class="label" style="margin-top:4px" id="last-run-clips"></div>
+  <div class="sidebar-stats">
+    <div class="sidebar-stat">
+      <span class="sidebar-stat-value" id="sidebar-clips">--</span>
+      <span class="sidebar-stat-label">clips</span>
+    </div>
+    <div class="sidebar-stat">
+      <span class="sidebar-stat-value" id="sidebar-videos">--</span>
+      <span class="sidebar-stat-label">videos</span>
+    </div>
   </div>
 </nav>
 
+<!-- Main content -->
 <main class="main">
 
-  <!-- Dashboard -->
-  <div class="page active" id="page-dashboard">
+  <!-- ==================== UPLOAD PAGE ==================== -->
+  <section class="page active" id="page-upload">
     <div class="page-header">
-      <h1 class="page-title">Dashboard</h1>
-      <div class="page-header-actions">
-        <button type="button" class="btn" onclick="refreshDashboard()">↺ Refresh</button>
-        <button type="button" class="btn btn-primary" onclick="navigate('ingest')">↑ Clippify</button>
-        <span class="page-header-actions-spacer" aria-hidden="true"></span>
-        <button type="button" class="btn btn-sm" onclick="navigate('library')">Library</button>
-        <button type="button" class="btn btn-sm" onclick="navigate('config')">Config</button>
-      </div>
+      <h1>Upload & Clip</h1>
+      <p class="page-desc">Drop a video, choose how many clips you want, and let the pipeline do its thing.</p>
     </div>
 
-    <div class="stat-grid">
-      <div class="stat-card">
-        <div class="label">clips ready</div>
-        <div class="value" id="stat-outputs">—</div>
-        <div class="sub">in data/outputs/</div>
-      </div>
-      <div class="stat-card">
-        <div class="label">source videos</div>
-        <div class="value" id="stat-videos">—</div>
-        <div class="sub">downloaded</div>
-      </div>
-      <div class="stat-card">
-        <div class="label">clips used</div>
-        <div class="value" id="stat-used">—</div>
-        <div class="sub">in registry</div>
-      </div>
-      <div class="stat-card">
-        <div class="label">avg score</div>
-        <div class="value" id="stat-score">—</div>
-        <div class="sub">text + audio</div>
-      </div>
-    </div>
-
-    <div class="section-title">top clips — ready to post</div>
-    <div class="clips-grid" id="dashboard-clips">
-      <div class="empty-state" style="grid-column:1/-1">
-        <div class="icon">🎬</div>
-        <div class="title">No clips yet</div>
-        <div class="desc">Use Clippify to generate clips</div>
-      </div>
-    </div>
-
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:1rem">
-      <div class="card">
-        <div class="section-title">Clippify status</div>
-        <table class="status-table">
-          <tr><td><span class="dot" id="dot-whisper"></span>Whisper model</td><td id="status-whisper">—</td></tr>
-          <tr><td><span class="dot" id="dot-scene"></span>Scene detection</td><td id="status-scene">—</td></tr>
-          <tr><td><span class="dot" id="dot-vertical"></span>Vertical export</td><td id="status-vertical">—</td></tr>
-          <tr><td><span class="dot" id="dot-visual"></span>Visual scoring</td><td id="status-visual">—</td></tr>
-          <tr><td><span class="dot" id="dot-trending"></span>Trending</td><td id="status-trending">—</td></tr>
-        </table>
-      </div>
-      <div class="card">
-        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:0.75rem">
-          <div class="section-title" style="margin-bottom:0">Live log</div>
-          <button class="btn btn-sm" onclick="refreshLog()">↺</button>
+    <!-- Upload zone -->
+    <div class="upload-card" id="upload-card">
+      <div class="upload-dropzone" id="upload-dropzone">
+        <div class="upload-dropzone-icon">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
         </div>
-        <div class="log-box" id="log-box">Loading...</div>
+        <div class="upload-dropzone-text">Drop your video here</div>
+        <div class="upload-dropzone-sub">MP4, MOV, MKV up to 2 GB</div>
+        <button class="btn btn-ghost" onclick="document.getElementById('file-input').click()">Browse files</button>
       </div>
-    </div>
-  </div>
-
-  <!-- Clippify batch (YouTube + logs) -->
-  <div class="page" id="page-run">
-    <div class="page-header">
-      <h1 class="page-title">Clippify batch</h1>
-      <div id="run-status-badge"></div>
+      <input type="file" id="file-input" accept=".mp4,.mov,.mkv,.m4v,.avi" style="display:none">
     </div>
 
-    <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:14px;margin-bottom:2rem">
-      <div class="card">
-        <div style="font-size:24px;margin-bottom:0.5rem">🚀</div>
-        <div style="font-weight:600;margin-bottom:0.5rem">Full Clippify</div>
-        <div style="font-size:12px;color:var(--text-muted);margin-bottom:1rem">Download new videos, transcribe, score, and export top clips</div>
-        <button class="btn btn-primary" style="width:100%" onclick="startPipeline('run')">Start full Clippify</button>
-      </div>
-      <div class="card">
-        <div style="font-size:24px;margin-bottom:0.5rem">⚡</div>
-        <div style="font-weight:600;margin-bottom:0.5rem">Rank only</div>
-        <div style="font-size:12px;color:var(--text-muted);margin-bottom:1rem">Score and rank already-downloaded videos. Skip the download step.</div>
-        <button class="btn" style="width:100%" onclick="startPipeline('rank')">Start rank</button>
-      </div>
-      <div class="card">
-        <div style="font-size:24px;margin-bottom:0.5rem">🗑️</div>
-        <div style="font-weight:600;margin-bottom:0.5rem">Refresh</div>
-        <div style="font-size:12px;color:var(--text-muted);margin-bottom:1rem">Clear all clips and manifests. Source videos are kept.</div>
-        <button class="btn btn-danger" style="width:100%" onclick="startPipeline('refresh')">Clear clips</button>
-      </div>
-    </div>
-
-    <div class="card" style="margin-bottom:1.5rem;overflow:visible">
-      <div class="section-title">Options</div>
-      <div class="form-row">
-        <div class="form-group">
-          <label>Limit videos (override config)</label>
-          <input type="number" id="opt-limit" placeholder="e.g. 5" min="1" max="100">
+    <!-- File selected state -->
+    <div class="upload-config-card" id="upload-config" style="display:none">
+      <div class="file-preview">
+        <div class="file-preview-icon">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="23 7 16 12 23 17 23 7"/><rect x="1" y="5" width="15" height="14" rx="2"/></svg>
         </div>
-        <div class="form-group" style="padding-bottom:1rem">
-          <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
-            <label style="display:flex;align-items:center;gap:8px;cursor:pointer;margin:0">
-              <input type="checkbox" id="opt-dryrun"> Dry Clippify (no files written)
-            </label>
-            <span class="info-hint" tabindex="0">
-              <span class="info-icon" aria-hidden="true">i</span>
-              <span class="info-tooltip" role="tooltip">Executes the chosen action without writing clips, manifests, or downloads. Useful to validate config and see log output only.</span>
-            </span>
+        <div class="file-preview-info">
+          <div class="file-preview-name" id="file-name"></div>
+          <div class="file-preview-size" id="file-size"></div>
+        </div>
+        <button class="btn btn-icon" onclick="clearFile()" title="Remove file">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+        </button>
+      </div>
+
+      <div class="config-row">
+        <div class="config-field">
+          <label>Number of clips</label>
+          <div class="clip-count-control">
+            <button class="btn btn-icon" onclick="adjustClipCount(-1)">-</button>
+            <input type="number" id="clip-count" value="5" min="1" max="50">
+            <button class="btn btn-icon" onclick="adjustClipCount(1)">+</button>
           </div>
         </div>
-      </div>
-      <button class="btn" onclick="stopPipeline()" id="stop-btn" style="display:none;color:var(--red);border-color:var(--red)">■ Stop Clippify</button>
-    </div>
-
-    <div class="card">
-      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:0.75rem">
-        <div class="section-title" style="margin-bottom:0">Log output</div>
-        <div style="display:flex;align-items:center;gap:8px">
-          <div id="run-spinner" style="display:none"><div class="spinner"></div></div>
-          <button class="btn btn-sm" onclick="refreshLog()">↺ Refresh</button>
-        </div>
-      </div>
-      <div class="log-box" id="run-log-box">Waiting for Clippify…</div>
-    </div>
-  </div>
-
-  <!-- Clippify (single upload) -->
-  <div class="page" id="page-ingest">
-    <div class="page-header">
-      <h1 class="page-title">Clippify</h1>
-      <span style="font-size:13px;color:var(--text-muted)">Upload a video — we transcribe, score, and cut it into clips</span>
-    </div>
-
-    <div class="ingest-hero">
-      <!-- Upload zone -->
-      <div class="upload-zone" id="upload-zone" onclick="document.getElementById('file-input').click()">
-        <div class="upload-icon">🎬</div>
-        <div class="upload-text">Drop your video here</div>
-        <div class="upload-sub">MP4, MOV, MKV · or click to browse</div>
-      </div>
-      <input type="file" id="file-input" accept=".mp4,.mov,.mkv,.m4v" style="display:none" onchange="handleFileSelect(this)">
-
-      <!-- File selected state — hidden until file chosen -->
-      <div id="upload-info" style="display:none">
-        <div class="ingest-meta-row">
-          <div class="ingest-meta-icon">🎞️</div>
-          <div class="ingest-meta-info">
-            <div class="ingest-meta-name" id="upload-filename"></div>
-            <div class="ingest-meta-size" id="upload-filesize"></div>
-          </div>
-          <button class="btn btn-sm" onclick="clearFileSelection()">✕</button>
-        </div>
-
-        <div class="form-group" style="margin-top:1rem">
-          <label>Custom title (optional)</label>
+        <div class="config-field">
+          <label>Title (optional)</label>
           <input type="text" id="upload-title" placeholder="e.g. Family Guy S12E04">
         </div>
-
-        <div class="ingest-actions">
-          <button class="btn btn-primary" id="ingest-btn" onclick="submitIngest()">
-            ▶ Clippify this video
-          </button>
-          <button class="btn" onclick="clearFileSelection()">Cancel</button>
-        </div>
       </div>
 
-      <!-- Progress section — hidden until ingest starts -->
-      <div id="ingest-progress" style="display:none;margin-top:1.25rem">
-        <div class="progress-wrap">
-          <div class="progress-label">
-            <span class="stage-name" id="progress-stage-name">Uploading...</span>
-            <span class="pct" id="progress-pct">0%</span>
-          </div>
-          <div class="progress-track">
-            <div class="progress-fill" id="progress-fill" style="width:0%"></div>
-          </div>
-          <div class="progress-stages" id="progress-stage-dots"></div>
-          <div class="stage-labels" id="progress-stage-labels"></div>
-        </div>
-        <div id="ingest-status" style="margin-top:0.75rem;font-size:13px;color:var(--text-muted)"></div>
+      <div class="config-row">
+        <label class="checkbox-label">
+          <input type="checkbox" id="auto-youtube" checked>
+          <span>Auto-upload top 2 clips to YouTube</span>
+        </label>
       </div>
 
-      <!-- Divider -->
-      <hr style="margin:2rem 0">
-
-      <!-- Recent uploads -->
-      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:1rem">
-        <div class="section-title" style="margin-bottom:0">Recent uploads</div>
-        <button class="btn btn-sm btn-danger" onclick="clearIngested()">🗑 Clear</button>
-      </div>
-      <div id="ingested-list">
-        <div style="color:var(--text-dim);font-size:13px">Loading...</div>
-      </div>
-    </div>
-
-    <!-- Exported vertical clips (same page as upload) -->
-    <section class="ingest-clips-section">
-      <hr style="margin:2.5rem 0 1.5rem">
-      <div class="ingest-clips-head">
-        <div>
-          <div class="section-title" style="margin-bottom:4px">Your clips</div>
-          <div style="font-size:12px;color:var(--text-muted)">Exported MP4s from your latest Clippify appear here</div>
-        </div>
-        <div style="display:flex;align-items:center;gap:10px">
-          <span style="font-size:13px;color:var(--text-muted)" id="output-count"></span>
-          <button class="btn btn-sm" onclick="loadOutputs()">↺ Refresh</button>
-        </div>
-      </div>
-      <div class="clips-grid" id="outputs-grid">
-        <div class="empty-state" style="grid-column:1/-1">
-          <div class="icon">📁</div>
-          <div class="title">No clips yet</div>
-          <div class="desc">When Clippify finishes, vertical exports show up here (enable Vertical export in Config)</div>
-        </div>
-      </div>
-    </section>
-  </div>
-
-  <!-- Library -->
-  <div class="page" id="page-library">
-    <div class="page-header">
-      <h1 class="page-title">Library
-        <span style="font-size:14px;font-weight:400;color:var(--text-muted)" id="lib-count"></span>
-      </h1>
-      <button class="btn" onclick="loadLibrary()">↺ Refresh</button>
-    </div>
-
-    <div class="library-subtabs" role="tablist">
-      <button type="button" class="lib-subtab active" data-lib-tab="videos" onclick="setLibTab('videos')">Videos</button>
-      <button type="button" class="lib-subtab" data-lib-tab="clips" onclick="setLibTab('clips')">Clips</button>
-    </div>
-
-    <div id="library-videos-panel">
-      <div class="library-filters">
-        <button class="filter-btn active" data-filter="all" onclick="setLibFilter('all')">All</button>
-        <button class="filter-btn" data-filter="ingested" onclick="setLibFilter('ingested')">Ingested</button>
-        <button class="filter-btn" data-filter="ranked" onclick="setLibFilter('ranked')">Ranked</button>
-        <button class="filter-btn" data-filter="exhausted" onclick="setLibFilter('exhausted')">Exhausted</button>
-        <input
-          type="text"
-          class="library-search"
-          id="lib-search"
-          placeholder="Search episodes..."
-          oninput="renderLibrary()"
-        >
-      </div>
-
-      <div class="library-grid" id="library-grid">
-        <div class="lib-empty">
-          <div class="icon">📚</div>
-          <div class="title">No videos yet</div>
-          <div class="desc">Clippify a video to start building your library</div>
-        </div>
-      </div>
-    </div>
-
-    <div id="library-clips-panel" style="display:none">
-      <div class="library-filters">
-        <input
-          type="text"
-          class="library-search"
-          id="lib-clip-search"
-          placeholder="Search clips by text, video id, or clip id..."
-          oninput="renderLibraryClips()"
-          style="max-width:100%;flex:1"
-        >
-      </div>
-      <p style="font-size:12px;color:var(--text-muted);margin:-0.5rem 0 1rem">Ranked segments from <code style="font-size:11px">top_ranked_manifest.json</code> — preview uses vertical exports in outputs when available.</p>
-      <div class="clips-grid library-clips-grid" id="library-clips-grid">
-        <div class="empty-state" style="grid-column:1/-1">
-          <div class="icon">🎞️</div>
-          <div class="title">No clips yet</div>
-          <div class="desc">Clippify a video to populate ranked clips</div>
-        </div>
-      </div>
-    </div>
-  </div>
-
-  <!-- Splice: multi-upload, rank only these files -->
-  <div class="page" id="page-splice">
-    <div class="page-header">
-      <h1 class="page-title">Splice uploads</h1>
-    </div>
-    <div class="card" style="max-width:640px">
-      <div class="section-title">Clippify uploads only</div>
-      <p style="font-size:13px;color:var(--text-muted);margin-bottom:1rem;line-height:1.5">
-        Add one or more video files, then submit. Clippify runs Whisper + scoring
-        <strong>only on these files</strong> — no YouTube download and no search queries.
-      </p>
-      <div class="form-group">
-        <label>Videos</label>
-        <input type="file" id="splice-files" multiple accept=".mp4,.mov,.mkv,.m4v,.avi,video/*">
-      </div>
-      <div id="splice-file-list" class="splice-file-list"></div>
-      <button type="button" class="btn btn-primary" style="margin-top:0.75rem" onclick="submitSplice()" id="splice-submit">
-        Clippify these uploads
+      <button class="btn btn-primary btn-lg" id="start-btn" onclick="startClipping()">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+        Start Clipping
       </button>
-      <div id="splice-progress-wrap" class="progress-wrap" style="display:none;margin-top:1rem">
-        <div class="progress-bar"><div class="progress-fill" id="splice-progress-fill"></div></div>
-        <div class="progress-label" id="splice-progress-label"></div>
-      </div>
-      <div id="splice-status" style="margin-top:1rem;font-size:13px"></div>
     </div>
-  </div>
 
-  <!-- Config -->
-  <div class="page" id="page-config">
-    <div class="page-header">
-      <h1 class="page-title">Configuration</h1>
-      <button class="btn btn-primary" onclick="saveConfig()">Save config</button>
-    </div>
-    <div id="config-saved" style="display:none;margin-bottom:1rem;padding:0.75rem;background:var(--green-bg);border-radius:var(--radius-sm);color:var(--green);font-size:13px">
-      ✓ Config saved successfully
-    </div>
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
-      <div>
-        <div class="card" style="margin-bottom:16px">
-          <div class="section-title">Search queries</div>
-          <div class="form-group">
-            <label>YouTube search strings (one per row)</label>
-            <div id="cfg-queries-rows" class="query-rows"></div>
-            <button type="button" class="btn btn-sm" id="cfg-add-query" onclick="addQueryRow()">+ Add query</button>
-          </div>
-        </div>
-        <div class="card" style="margin-bottom:16px">
-          <div class="section-title">Download settings</div>
-          <div class="form-row">
-            <div class="form-group">
-              <label>Results per query</label>
-              <input type="number" id="cfg-results-per-query" min="1" max="50">
-            </div>
-            <div class="form-group">
-              <label>Max videos total</label>
-              <input type="number" id="cfg-max-videos" min="1" max="200">
-            </div>
-          </div>
-          <div class="form-group">
-            <label>Download quality</label>
-            <select id="cfg-quality">
-              <option value="480p">480p (fast testing)</option>
-              <option value="720p">720p (balanced)</option>
-              <option value="best">Best (production)</option>
-            </select>
-          </div>
-          <div class="form-row">
-            <div class="form-group">
-              <label>Min video duration (s)</label>
-              <input type="number" id="cfg-min-dur" min="0">
-            </div>
-            <div class="form-group">
-              <label>Max video duration (s)</label>
-              <input type="number" id="cfg-max-dur" min="0">
-            </div>
-          </div>
-        </div>
-        <div class="card">
-          <div class="section-title">Segment settings</div>
-          <div class="form-row">
-            <div class="form-group">
-              <label>Min segment (s)</label>
-              <input type="number" id="cfg-seg-min" step="0.5">
-            </div>
-            <div class="form-group">
-              <label>Max segment (s)</label>
-              <input type="number" id="cfg-seg-max" step="0.5">
-            </div>
-          </div>
-          <div class="form-group">
-            <label>Top N clips globally</label>
-            <input type="number" id="cfg-top-n" min="1" max="100">
-          </div>
-        </div>
-      </div>
-      <div>
-        <div class="card" style="margin-bottom:16px">
-          <div class="section-title">Model settings</div>
-          <div class="form-group">
-            <label>Whisper (MLX) model</label>
-            <select id="cfg-whisper-model">
-              <option value="distil-large-v3">distil-large-v3 — fast, English</option>
-              <option value="large-v3">large-v3</option>
-              <option value="large-v2">large-v2</option>
-              <option value="medium">medium</option>
-              <option value="small">small</option>
-              <option value="mlx-community/distil-whisper-large-v3">distil-whisper-large-v3 (full id)</option>
-            </select>
-          </div>
-          <div class="form-group">
-            <label>OpenAI model (scoring)</label>
-            <select id="cfg-openai-model">
-              <option value="gpt-4o-mini">gpt-4o-mini</option>
-              <option value="gpt-4o">gpt-4o</option>
-              <option value="gpt-4-turbo">gpt-4-turbo</option>
-              <option value="gpt-3.5-turbo">gpt-3.5-turbo</option>
-            </select>
-          </div>
-        </div>
-        <div class="card" style="margin-bottom:16px;overflow:visible">
-          <div class="section-title">Features</div>
-          <div class="toggle-row">
-            <span class="toggle-row-left">
-              <span class="toggle-label">Scoring: text</span>
-              <span class="info-hint" tabindex="0">
-                <span class="info-icon" aria-hidden="true">i</span>
-                <span class="info-tooltip" role="tooltip">Scores each segment’s transcript with your OpenAI model and prompt (e.g. funniness). Uses API tokens per segment. Turning this off removes text from the fused score unless you enable other signals.</span>
-              </span>
-            </span>
-            <input type="checkbox" id="cfg-scoring-text">
-          </div>
-          <div class="toggle-row">
-            <span class="toggle-row-left">
-              <span class="toggle-label">Scoring: audio</span>
-              <span class="info-hint" tabindex="0">
-                <span class="info-icon" aria-hidden="true">i</span>
-                <span class="info-tooltip" role="tooltip">Performs local librosa-style energy analysis on the segment’s audio. No extra API cost. If disabled, audio does not contribute to the blended score.</span>
-              </span>
-            </span>
-            <input type="checkbox" id="cfg-scoring-audio">
-          </div>
-          <div class="toggle-row">
-            <span class="toggle-row-left">
-              <span class="toggle-label">Scoring: visual (costs $)</span>
-              <span class="info-hint" tabindex="0">
-                <span class="info-icon" aria-hidden="true">i</span>
-                <span class="info-tooltip" role="tooltip">Sends sampled frames to a vision model for scoring. Costs money, adds latency, and needs API access. Use when you want visuals to influence ranking; leave off to save budget.</span>
-              </span>
-            </span>
-            <input type="checkbox" id="cfg-scoring-visual">
-          </div>
-          <div class="toggle-row">
-            <span class="toggle-row-left">
-              <span class="toggle-label">Scene detection</span>
-              <span class="info-hint" tabindex="0">
-                <span class="info-icon" aria-hidden="true">i</span>
-                <span class="info-tooltip" role="tooltip">Uses PySceneDetect to find cuts and nudge Whisper segments toward scene boundaries. Slightly more CPU time; can produce cleaner edits. If off, segments follow transcript timing only.</span>
-              </span>
-            </span>
-            <input type="checkbox" id="cfg-scene">
-          </div>
-          <div class="toggle-row">
-            <span class="toggle-row-left">
-              <span class="toggle-label">Vertical export</span>
-              <span class="info-hint" tabindex="0">
-                <span class="info-icon" aria-hidden="true">i</span>
-                <span class="info-tooltip" role="tooltip">After ranking, exports top clips as 9:16 vertical MP4s with subtitles into data/outputs/. Extra ffmpeg work and disk space. Ranked files in candidates_ranked still exist either way.</span>
-              </span>
-            </span>
-            <input type="checkbox" id="cfg-vertical">
-          </div>
-          <div class="toggle-row">
-            <span class="toggle-row-left">
-              <span class="toggle-label">YouTube trending</span>
-              <span class="info-hint" tabindex="0">
-                <span class="info-icon" aria-hidden="true">i</span>
-                <span class="info-tooltip" role="tooltip">Prepends trending videos from the YouTube Data API to the download pool (requires API key setup). Does not affect splice uploads or rank-only on files already local.</span>
-              </span>
-            </span>
-            <input type="checkbox" id="cfg-trending">
-          </div>
-        </div>
-        <div class="card">
-          <div class="section-title">Scoring prompt</div>
-          <textarea id="cfg-prompt" rows="12" style="font-family:var(--mono);font-size:12px"></textarea>
-        </div>
-      </div>
-    </div>
-  </div>
+    <!-- Pipeline progress -->
+    <div class="pipeline-card" id="pipeline-progress" style="display:none">
 
-  <!-- Registry -->
-  <div class="page" id="page-registry">
+      <!-- File info banner -->
+      <div class="pipeline-file-banner" id="pipeline-file-banner"></div>
+
+      <!-- Node progress -->
+      <div class="pipeline-nodes" id="pipeline-nodes">
+        <div class="pipeline-node" data-stage="upload">
+          <div class="node-dot"><div class="node-dot-inner"></div></div>
+          <div class="node-connector"></div>
+          <div class="node-label">Upload</div>
+        </div>
+        <div class="pipeline-node" data-stage="ingest">
+          <div class="node-dot"><div class="node-dot-inner"></div></div>
+          <div class="node-connector"></div>
+          <div class="node-label">Ingest</div>
+        </div>
+        <div class="pipeline-node" data-stage="transcribe">
+          <div class="node-dot"><div class="node-dot-inner"></div></div>
+          <div class="node-connector"></div>
+          <div class="node-label">Transcribe</div>
+        </div>
+        <div class="pipeline-node" data-stage="score">
+          <div class="node-dot"><div class="node-dot-inner"></div></div>
+          <div class="node-connector"></div>
+          <div class="node-label">Score</div>
+        </div>
+        <div class="pipeline-node" data-stage="export">
+          <div class="node-dot"><div class="node-dot-inner"></div></div>
+          <div class="node-connector"></div>
+          <div class="node-label">Export</div>
+        </div>
+        <div class="pipeline-node" data-stage="youtube">
+          <div class="node-dot"><div class="node-dot-inner"></div></div>
+          <div class="node-label">YouTube</div>
+        </div>
+      </div>
+
+      <!-- Overall progress bar -->
+      <div class="pipeline-bar">
+        <div class="pipeline-bar-fill" id="pipeline-bar-fill"></div>
+      </div>
+      <div class="pipeline-status">
+        <span id="pipeline-stage-text">Preparing...</span>
+        <span id="pipeline-pct">0%</span>
+      </div>
+
+      <!-- Log output (collapsible) -->
+      <details class="pipeline-log-details">
+        <summary>View log output</summary>
+        <div class="log-box" id="pipeline-log-box"></div>
+      </details>
+
+      <button class="btn btn-danger" id="stop-btn" onclick="stopPipeline()" style="display:none">Stop Pipeline</button>
+    </div>
+
+    <!-- Results section (shown after pipeline completes) -->
+    <div class="results-card" id="results-section" style="display:none">
+      <div class="results-header">
+        <h2>Your Clips</h2>
+        <div class="results-actions">
+          <button class="btn btn-ghost" onclick="navigate('library')">View in Library</button>
+          <button class="btn btn-primary" onclick="resetUpload()">Clip Another Video</button>
+        </div>
+      </div>
+      <div class="clips-grid" id="results-grid"></div>
+      <div id="youtube-upload-status"></div>
+    </div>
+  </section>
+
+  <!-- ==================== LIBRARY PAGE ==================== -->
+  <section class="page" id="page-library">
     <div class="page-header">
-      <h1 class="page-title">Registry</h1>
-      <button class="btn btn-danger" onclick="clearRegistry()">Clear used clips</button>
+      <h1>Library</h1>
+      <p class="page-desc">All your generated clips, ranked by score.</p>
     </div>
-    <div class="stat-grid" style="grid-template-columns:repeat(3,1fr)">
-      <div class="stat-card">
-        <div class="label">used clips</div>
-        <div class="value" id="reg-used">—</div>
-        <div class="sub">never repeated</div>
+
+    <div class="library-toolbar">
+      <div class="library-tabs">
+        <button class="lib-tab active" data-tab="clips" onclick="setLibTab('clips')">Clips</button>
+        <button class="lib-tab" data-tab="videos" onclick="setLibTab('videos')">Source Videos</button>
       </div>
-      <div class="stat-card">
-        <div class="label">processed videos</div>
-        <div class="value" id="reg-processed">—</div>
-        <div class="sub">source videos mined</div>
-      </div>
-      <div class="stat-card">
-        <div class="label">exhausted videos</div>
-        <div class="value" id="reg-exhausted">—</div>
-        <div class="sub">fully mined out</div>
+      <input type="text" class="search-input" id="library-search" placeholder="Search clips..." oninput="renderLibrary()">
+    </div>
+
+    <!-- Clips panel -->
+    <div id="lib-clips-panel">
+      <div class="clips-grid" id="library-clips-grid">
+        <div class="empty-state">
+          <div class="empty-icon">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="2" y="2" width="20" height="20" rx="2"/><line x1="2" y1="10" x2="22" y2="10"/><line x1="10" y1="2" x2="10" y2="22"/></svg>
+          </div>
+          <div class="empty-title">No clips yet</div>
+          <div class="empty-desc">Upload a video to generate clips</div>
+        </div>
       </div>
     </div>
-    <div class="card" style="margin-top:1.5rem">
-      <div class="section-title">Processed source videos</div>
-      <div id="reg-table">Loading...</div>
+
+    <!-- Videos panel -->
+    <div id="lib-videos-panel" style="display:none">
+      <div class="videos-grid" id="library-videos-grid">
+        <div class="empty-state">
+          <div class="empty-icon">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><polygon points="23 7 16 12 23 17 23 7"/><rect x="1" y="5" width="15" height="14" rx="2"/></svg>
+          </div>
+          <div class="empty-title">No videos yet</div>
+          <div class="empty-desc">Upload a video to get started</div>
+        </div>
+      </div>
     </div>
-  </div>
+  </section>
+
+  <!-- ==================== SETTINGS PAGE ==================== -->
+  <section class="page" id="page-settings">
+    <div class="page-header">
+      <h1>Settings</h1>
+      <p class="page-desc">Configure pipeline behavior and models.</p>
+    </div>
+
+    <div class="settings-grid">
+      <!-- Clipping -->
+      <div class="settings-card">
+        <h3>Clipping</h3>
+        <div class="setting-row">
+          <label>Min clip length (seconds)</label>
+          <input type="number" id="cfg-seg-min" step="0.5">
+        </div>
+        <div class="setting-row">
+          <label>Max clip length (seconds)</label>
+          <input type="number" id="cfg-seg-max" step="0.5">
+        </div>
+        <div class="setting-row">
+          <label>Default clip count</label>
+          <input type="number" id="cfg-top-n" min="1" max="100">
+        </div>
+      </div>
+
+      <!-- Models -->
+      <div class="settings-card">
+        <h3>Models</h3>
+        <div class="setting-row">
+          <label>Whisper model</label>
+          <select id="cfg-whisper-model">
+            <option value="distil-large-v3">distil-large-v3 (fast)</option>
+            <option value="large-v3">large-v3</option>
+            <option value="large-v2">large-v2</option>
+            <option value="medium">medium</option>
+            <option value="small">small</option>
+          </select>
+        </div>
+        <div class="setting-row">
+          <label>Scoring model</label>
+          <select id="cfg-openai-model">
+            <option value="gpt-4o-mini">gpt-4o-mini</option>
+            <option value="gpt-4o">gpt-4o</option>
+            <option value="gpt-4-turbo">gpt-4-turbo</option>
+          </select>
+        </div>
+        <div class="setting-row">
+          <label>Download quality</label>
+          <select id="cfg-quality">
+            <option value="480p">480p (fast)</option>
+            <option value="720p">720p</option>
+            <option value="best">Best</option>
+          </select>
+        </div>
+      </div>
+
+      <!-- Scoring -->
+      <div class="settings-card">
+        <h3>Scoring</h3>
+        <div class="setting-toggle">
+          <span>Text scoring (GPT)</span>
+          <input type="checkbox" id="cfg-scoring-text">
+        </div>
+        <div class="setting-toggle">
+          <span>Audio scoring (local)</span>
+          <input type="checkbox" id="cfg-scoring-audio">
+        </div>
+        <div class="setting-toggle">
+          <span>Visual scoring (GPT Vision - costs $)</span>
+          <input type="checkbox" id="cfg-scoring-visual">
+        </div>
+      </div>
+
+      <!-- Features -->
+      <div class="settings-card">
+        <h3>Features</h3>
+        <div class="setting-toggle">
+          <span>Scene detection</span>
+          <input type="checkbox" id="cfg-scene">
+        </div>
+        <div class="setting-toggle">
+          <span>Vertical export (9:16 + subtitles)</span>
+          <input type="checkbox" id="cfg-vertical">
+        </div>
+        <div class="setting-toggle">
+          <span>Auto YouTube upload (top 2)</span>
+          <input type="checkbox" id="cfg-auto-youtube">
+        </div>
+      </div>
+
+      <!-- YouTube -->
+      <div class="settings-card">
+        <h3>YouTube</h3>
+        <div id="yt-auth-status" class="yt-auth-status">
+          <span class="yt-status-dot yt-status-unknown"></span>
+          <span>Checking connection...</span>
+        </div>
+        <button class="btn btn-primary" id="yt-auth-btn" onclick="authorizeYouTube()">Connect YouTube Account</button>
+        <p class="setting-hint">Required for auto-uploading clips. Uses OAuth2 for secure access.</p>
+      </div>
+
+      <!-- Prompt -->
+      <div class="settings-card settings-card-wide">
+        <h3>Scoring Prompt</h3>
+        <textarea id="cfg-prompt" rows="10" placeholder="Scoring instructions for GPT..."></textarea>
+      </div>
+    </div>
+
+    <div class="settings-actions">
+      <button class="btn btn-primary" onclick="saveSettings()">Save Settings</button>
+      <span class="save-status" id="save-status"></span>
+    </div>
+  </section>
 
 </main>
 
 <!-- Video modal -->
-<div class="modal-overlay" id="video-modal" onclick="closeModal(event)">
-  <div class="modal-box" onclick="event.stopPropagation()">
-    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:1rem">
-      <div style="font-weight:600" id="modal-title">Clip</div>
-      <button class="btn btn-sm" onclick="closeVideoModal()">✕ Close</button>
+<div class="modal-overlay" id="video-modal">
+  <div class="modal-content" onclick="event.stopPropagation()">
+    <div class="modal-header">
+      <h3 id="modal-title">Clip</h3>
+      <button class="btn btn-icon" onclick="closeModal()">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+      </button>
     </div>
     <video class="modal-video" id="modal-video" controls autoplay></video>
-    <div style="display:flex;gap:8px;justify-content:space-between;align-items:center">
-      <div>
-        <span id="modal-score" class="badge badge-accent"></span>
-        <span id="modal-duration" style="font-size:12px;color:var(--text-muted);margin-left:8px"></span>
-      </div>
-      <a id="modal-download" class="btn btn-sm" download>⬇ Download</a>
+    <div class="modal-meta">
+      <span class="modal-score" id="modal-score"></span>
+      <span class="modal-duration" id="modal-duration"></span>
     </div>
-    <div style="margin-top:0.75rem;font-size:12px;color:var(--text-muted);line-height:1.6" id="modal-text"></div>
+    <p class="modal-text" id="modal-text"></p>
+    <div class="modal-actions">
+      <a class="btn btn-ghost" id="modal-download" download>Download</a>
+    </div>
   </div>
 </div>
 
